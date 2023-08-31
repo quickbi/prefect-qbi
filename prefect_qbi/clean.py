@@ -3,7 +3,8 @@ import re
 import time
 
 from google.cloud import bigquery
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import Conflict, NotFound
+from prefect_gcp import GcpCredentials
 
 
 def get_dataset_location(client, project_id, dataset_id):
@@ -48,8 +49,7 @@ def create_dataset_with_location(client, project_id, dataset_id, location):
     dataset.location = location
     try:
         client.create_dataset(dataset)
-    except Exception as e:
-        print(">>", e)
+    except Conflict as e:
         if "Already Exists" not in str(e):
             raise e
 
@@ -61,7 +61,10 @@ def process_and_copy_table(
     destination_dataset_id,
     table_name,
     source_location,
+    table_prefix,
 ):
+    table_name_snake_case = convert_to_snake_case(table_name)
+    table_name_final = f"{table_prefix}__{table_name_snake_case}"
     source_table_ref = f"{project_id}.{source_dataset_id}.{table_name}"
     source_table = client.get_table(source_table_ref)
     schema = source_table.schema
@@ -71,7 +74,7 @@ def process_and_copy_table(
     # Generate a unique temporary table name with timestamp and random number
     timestamp = int(time.time())
     random_suffix = random.randint(1000, 9999)
-    temp_table_id = f"{table_name}_temp_{timestamp}_{random_suffix}"
+    temp_table_id = f"{table_name_final}__temp_{timestamp}_{random_suffix}"
 
     # Create the temporary destination table with the transformed schema
     destination_temp_table_ref = (
@@ -93,7 +96,9 @@ def process_and_copy_table(
         client.query(query).result()
 
         # Delete the original destination table if it exists
-        destination_table_ref = f"{project_id}.{destination_dataset_id}.{table_name}"
+        destination_table_ref = (
+            f"{project_id}.{destination_dataset_id}.{table_name_final}"
+        )
         try:
             client.delete_table(destination_table_ref)
         except NotFound as e:
@@ -102,7 +107,7 @@ def process_and_copy_table(
         # Rename the temporary table to the original table's name using SQL
         rename_query = f"""
             ALTER TABLE `{destination_temp_table_ref}`
-            RENAME TO `{table_name}`
+            RENAME TO `{table_name_final}`
         """
         client.query(rename_query).result()
 
@@ -118,8 +123,17 @@ def process_and_copy_table(
         print(f"Error processing table '{table_name}': {e}")
 
 
-def copy_tables_with_transform(project_id, source_dataset_id, destination_dataset_id):
-    client = bigquery.Client()
+def copy_tables_with_transform(
+    customer,
+    gcp_credentials_block_name,
+    source_dataset_id,
+    destination_dataset_id,
+    table_prefix,
+):
+    gcp_credentials_block = GcpCredentials.load(gcp_credentials_block_name)
+    client = gcp_credentials_block.get_bigquery_client()
+    project_id = gcp_credentials_block.project
+    assert project_id, "No project found"
 
     source_location = get_dataset_location(client, project_id, source_dataset_id)
     create_dataset_with_location(
@@ -137,4 +151,5 @@ def copy_tables_with_transform(project_id, source_dataset_id, destination_datase
             destination_dataset_id,
             table.table_id,
             source_location,
+            table_prefix,
         )
