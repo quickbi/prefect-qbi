@@ -2,8 +2,8 @@ import random
 import re
 import time
 
-from google.cloud import bigquery
 from google.api_core.exceptions import Conflict, NotFound
+from google.cloud import bigquery
 from prefect_gcp import GcpCredentials
 
 
@@ -54,7 +54,7 @@ def create_dataset_with_location(client, project_id, dataset_id, location):
             raise e
 
 
-def process_and_copy_table(
+def transform_table(
     client,
     project_id,
     source_dataset_id,
@@ -71,12 +71,12 @@ def process_and_copy_table(
 
     destination_schema = transform_schema(schema)
 
-    # Generate a unique temporary table name with timestamp and random number
+    # Generate a unique temporary table name with timestamp and random number.
     timestamp = int(time.time())
     random_suffix = random.randint(1000, 9999)
     temp_table_id = f"{table_name_final}__temp_{timestamp}_{random_suffix}"
 
-    # Create the temporary destination table with the transformed schema
+    # Create the temporary destination table with the transformed schema.
     destination_temp_table_ref = (
         f"{project_id}.{destination_dataset_id}.{temp_table_id}"
     )
@@ -86,7 +86,7 @@ def process_and_copy_table(
     client.create_table(destination_temp_table)
 
     try:
-        # Construct and execute the SQL query to copy data
+        # Construct and execute the SQL query to copy data.
         query = f"""
             INSERT INTO `{destination_temp_table_ref}`
             SELECT *
@@ -101,7 +101,7 @@ def process_and_copy_table(
         )
         try:
             client.delete_table(destination_table_ref)
-        except NotFound as e:
+        except NotFound:
             pass
 
         # Rename the temporary table to the original table's name using SQL
@@ -114,17 +114,16 @@ def process_and_copy_table(
         print(f"Table '{table_name}' copied and renamed.")
 
     except Exception as e:
-        # Delete the temporary table in case of an error
+        # Delete the temporary table in case of an error.
         try:
             client.delete_table(destination_temp_table_ref)
-        except NotFound as e:
+        except NotFound:
             pass
 
         print(f"Error processing table '{table_name}': {e}")
 
 
-def copy_tables_with_transform(
-    customer,
+def transform_dataset(
     gcp_credentials_block_name,
     source_dataset_id,
     destination_dataset_id,
@@ -144,7 +143,7 @@ def copy_tables_with_transform(
     source_tables = client.list_tables(source_dataset_ref)
 
     for table in source_tables:
-        process_and_copy_table(
+        transform_table(
             client,
             project_id,
             source_dataset_id,
