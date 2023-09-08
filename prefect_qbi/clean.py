@@ -4,7 +4,6 @@ import time
 
 from google.api_core.exceptions import Conflict, NotFound
 from google.cloud import bigquery
-from prefect_gcp import GcpCredentials
 
 
 def get_dataset_location(client, project_id, dataset_id):
@@ -124,16 +123,12 @@ def transform_table(
 
 
 def transform_dataset(
-    gcp_credentials_block_name,
+    client,
+    project_id,
     source_dataset_id,
     destination_dataset_id,
     table_prefix,
 ):
-    gcp_credentials_block = GcpCredentials.load(gcp_credentials_block_name)
-    client = gcp_credentials_block.get_bigquery_client()
-    project_id = gcp_credentials_block.project
-    assert project_id, "No project found"
-
     source_location = get_dataset_location(client, project_id, source_dataset_id)
     create_dataset_with_location(
         client, project_id, destination_dataset_id, source_location
