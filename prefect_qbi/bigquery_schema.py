@@ -4,9 +4,8 @@ from google.cloud import bigquery
 
 from .utils import convert_to_snake_case
 
-EXCLUDED_COLUMNS = ["_airbyte_raw_id", "_airbyte_meta"]
 CUSTOM_RENAMINGS = {
-    "_airbyte_extracted_at": "_extracted_at",
+    "_airbyte_extracted_at": "_row_extracted_at",
 }
 SAMPLE_SIZE = 50
 
@@ -66,9 +65,14 @@ def get_schema_mapping(
     """
     table_ref = f"{project_id}.{source_dataset_id}.{table_name}"
     filtered_schema = [
-        field for field in source_schema if field.name not in EXCLUDED_COLUMNS
+        field
+        for field in source_schema
+        if (
+            not field.name.startswith("_airbyte")
+            or field.name == "_airbyte_extracted_at"
+        )
     ]
-    # Move "_airbyte*" fields to the end.
+    # Move remaining "_airbyte*" fields to the end.
     schema = sorted(
         filtered_schema, key=lambda field: field.name.startswith("_airbyte")
     )
