@@ -135,10 +135,20 @@ def infer_columns_from_json_by_sampling(client, json_columns, table_ref):
     if not json_columns:
         return {}
     json_columns_str = ", ".join(json_columns)
+
     query = f"""
-        SELECT {json_columns_str}
-        FROM `{table_ref}`
-        LIMIT {SAMPLE_SIZE}
+        WITH batched_rows AS (
+          (SELECT {json_columns_str} FROM `{table_ref}` LIMIT {SAMPLE_SIZE * 2} OFFSET 0)
+          UNION ALL
+          (SELECT {json_columns_str} FROM `{table_ref}` LIMIT {SAMPLE_SIZE * 2} OFFSET 10000)
+          UNION ALL
+          (SELECT {json_columns_str} FROM `{table_ref}` LIMIT {SAMPLE_SIZE * 2} OFFSET 100000)
+        )
+
+        SELECT *
+        FROM batched_rows
+        ORDER BY RAND()
+        LIMIT {SAMPLE_SIZE};
     """
     query_job = client.query(query)
     rows = list(query_job)
