@@ -7,7 +7,7 @@ from .utils import convert_to_snake_case
 CUSTOM_RENAMINGS = {
     "_airbyte_extracted_at": "_row_extracted_at",
 }
-SAMPLE_SIZE = 50
+SAMPLE_SIZE = 1000
 
 
 def _rename(name):
@@ -157,14 +157,15 @@ def infer_columns_from_json_by_sampling(client, json_columns, table_ref):
     json_column_schemas = {}
     for row in rows:
         for field_name, field_value in row.items():
-            json_column_schemas[field_name] = analyze_json_value(field_value)
-        # TEMP - TODO
-        break
+            field_schema = json_column_schemas.get(field_name, {})
+            json_column_schemas[field_name] = analyze_json_value(
+                field_value, field_schema
+            )
 
     return json_column_schemas
 
 
-def analyze_json_value(value):
+def analyze_json_value(value, previous_mapping):
     """Return mapping from keys to BigQuery data types"""
     subcolumns = {}
 
@@ -176,7 +177,11 @@ def analyze_json_value(value):
 
     if isinstance(obj, dict):
         for key, val in obj.items():
-            subcolumns[key] = get_bigquery_type(val)
+            this_type = get_bigquery_type(val)
+            previous_type = previous_mapping.get(key, "STRING")
+            new_type = get_better_type(this_type, previous_type)
+
+            subcolumns[key] = new_type
 
     return subcolumns
 
@@ -197,3 +202,14 @@ def get_bigquery_type(value):
         return "RECORD"
     else:
         return "STRING"  # Default to STRING if type is not recognized
+
+
+type_precedence = ["FLOAT64", "BOOL", "INT64", "RECORD", "STRING"]
+type_precedence_dict = {value: index for index, value in enumerate(type_precedence)}
+
+
+def get_better_type(value1, value2):
+    position1 = type_precedence_dict.get(value1, float("inf"))
+    position2 = type_precedence_dict.get(value2, float("inf"))
+    result = value1 if position1 < position2 else value2
+    return result
