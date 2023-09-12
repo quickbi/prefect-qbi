@@ -3,13 +3,14 @@ Run this to easily test cleaning dataset locally. You need to be authenticated
 to Google Cloud (default authentication is used).
 
 Example:
-    python test_clean_dataset.py my-project my_source_dataset my_destination_dataset test
+    python test_clean_dataset.py my-project my_src_dataset my_destination_dataset test
 
 """
 
 import sys
 
 from google.cloud import bigquery
+
 from prefect_qbi.clean import transform_dataset
 
 

@@ -1,10 +1,7 @@
-import re
-from pprint import pprint
-
 from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 
-from .bigquery_schema import transform_schema
+from .bigquery_schema import transform_table_schema
 from .bigquery_utils import create_dataset_with_location, get_dataset_location
 from .utils import convert_to_snake_case, get_unique_temp_table_name
 
@@ -51,7 +48,7 @@ def transform_table(
     source_schema = source_table.schema
 
     # Infer how schema should be transformed.
-    destination_schema, select_list = transform_schema(
+    destination_schema, select_list = transform_table_schema(
         source_schema, client, project_id, source_dataset_id, table_name
     )
 

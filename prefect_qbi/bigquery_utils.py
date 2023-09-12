@@ -1,5 +1,5 @@
-from google.cloud import bigquery
 from google.api_core.exceptions import Conflict
+from google.cloud import bigquery
 
 
 def get_dataset_location(client, project_id, dataset_id):
