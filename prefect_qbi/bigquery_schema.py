@@ -268,6 +268,11 @@ def process_mapping(original_field, new_fields):
         json_key = field_item["json_key"]
         field = field_item["field"]
 
+        # Temporarily skip RECORD types as error
+        # "Field <field_name> is type RECORD but has no schema" is raised.
+        if field.field_type == "RECORD":
+            continue
+
         schema_fields.append(field)
 
         if json_key:
