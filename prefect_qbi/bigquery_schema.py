@@ -276,7 +276,7 @@ def process_mapping(original_field, new_fields):
         schema_fields.append(field)
 
         if json_key:
-            selection = f"JSON_EXTRACT({original_field.name}, '$.{json_key}')"
+            selection = f"JSON_EXTRACT(`{original_field.name}`, '$.{json_key}')"
             type_conversion_func = (
                 f"LAX_{field.field_type}"
                 if field.field_type in ("INT64", "BOOL", "FLOAT64", "STRING")
@@ -285,9 +285,9 @@ def process_mapping(original_field, new_fields):
             if type_conversion_func:
                 selection = f"{type_conversion_func}({selection})"
         elif field_item["special_data_type"] == "csv":
-            selection = f"ARRAY_TO_STRING(JSON_EXTRACT_STRING_ARRAY({original_field.name}, '$'), ',')"
+            selection = f"ARRAY_TO_STRING(JSON_EXTRACT_STRING_ARRAY(`{original_field.name}`, '$'), ',')"
         else:
-            selection = original_field.name
+            selection = f"`{original_field.name}`"
         selects.append(selection)
 
     return schema_fields, selects
