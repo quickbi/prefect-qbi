@@ -168,19 +168,28 @@ def get_new_fields_from_mapping(original_field, new_fields):
 
         schema_fields.append(field)
 
-        if json_key:
-            selection = f"JSON_EXTRACT(`{original_field.name}`, '$.{json_key}')"
-            type_conversion_func = (
-                f"LAX_{field.field_type}"
-                if field.field_type in ("INT64", "BOOL", "FLOAT64", "STRING")
-                else None
-            )
-            if type_conversion_func:
-                selection = f"{type_conversion_func}({selection})"
-        elif field_item["special_data_type"] == "csv":
-            selection = f"ARRAY_TO_STRING(JSON_EXTRACT_STRING_ARRAY(`{original_field.name}`, '$'), ',')"
-        else:
-            selection = f"`{original_field.name}`"
+        selection = get_select_str(
+            original_field.name,
+            field.field_type,
+            json_key,
+            field_item["special_data_type"],
+        )
         selects.append(selection)
 
     return schema_fields, selects
+
+
+def get_select_str(field_name, field_type, json_key, special_data_type):
+    if json_key:
+        selection = f"JSON_EXTRACT(`{field_name}`, '$.{json_key}')"
+        type_conversion_func = (
+            f"LAX_{field_type}"
+            if field_type in ("INT64", "BOOL", "FLOAT64", "STRING")
+            else None
+        )
+        if type_conversion_func:
+            return f"{type_conversion_func}({selection})"
+    elif special_data_type == "csv":
+        return f"ARRAY_TO_STRING(JSON_EXTRACT_STRING_ARRAY(`{field_name}`, '$'), ',')"
+
+    return f"`{field_name}`"
