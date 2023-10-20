@@ -41,19 +41,17 @@ def get_new_schema(source_schema, client, project_id, source_dataset_id, table_n
             or field.name == "_airbyte_extracted_at"
         )
     ]
-    # Move remaining "_airbyte*" fields to the end.
-    sorted_schema = sorted(
-        filtered_schema, key=lambda field: field.name.startswith("_airbyte")
-    )
 
     # If there are JSON columns, infer schema by sampling data.
-    json_columns = [field.name for field in sorted_schema if field.field_type == "JSON"]
+    json_columns = [
+        field.name for field in filtered_schema if field.field_type == "JSON"
+    ]
     json_column_schemas = infer_columns_from_json_by_sampling(
         client, json_columns, table_ref
     )
 
     new_schema = []
-    for field in sorted_schema:
+    for field in filtered_schema:
         new_fields = map_to_new_fields(field, json_column_schemas)
 
         # Temporarily skip RECORD types as error
@@ -62,7 +60,18 @@ def get_new_schema(source_schema, client, project_id, source_dataset_id, table_n
 
         new_schema.extend(new_fields)
 
-    return new_schema
+    new_schema_sorted = sorted(new_schema, key=_get_field_sort_key)
+    return new_schema_sorted
+
+
+def _get_field_sort_key(field):
+    if field["field"].field_type == "JSON":
+        return 1
+    if field["field"].name == "_row_extracted_at":
+        return 2
+    if field["field"].name.startswith("_airbyte"):
+        return 3
+    return 0
 
 
 def map_to_new_fields(original_field, json_column_schemas):
