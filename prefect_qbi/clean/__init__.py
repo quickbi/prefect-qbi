@@ -87,7 +87,7 @@ def transform_table(
         """
         client.query(rename_query).result()
 
-        print(f"Table '{table_name}' copied and renamed.")
+        print(f"Table '{table_name}' transformed.")
 
     except Exception as e:
         # Delete the temporary table in case of an error.

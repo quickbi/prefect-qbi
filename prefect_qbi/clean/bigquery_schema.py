@@ -1,5 +1,3 @@
-import json
-
 from google.cloud import bigquery
 
 from .json_columns import infer_columns_from_json_by_sampling
@@ -22,45 +20,18 @@ def transform_table_schema(
     or
     "JSON_EXTRACT(some_json_column, '$.some_key'),"
     """
-
-    schema = []
-    select_list = []
-
-    # First, infer how each field should be mapped to new field(s).
-    mapping = get_schema_mapping(
+    new_schema = get_new_schema(
         source_schema, client, project_id, source_dataset_id, table_name
     )
 
-    # Then, get actual schema as simple list of fields and generate SQL for selecting
-    # those fields.
-    for original_field, new_fields in mapping:
-        schema_fields, selects = get_new_fields_from_mapping(original_field, new_fields)
-        schema.extend(schema_fields)
-        select_list.extend(selects)
-
+    fields = [field["field"] for field in new_schema]
+    select_list = [field["select_str"] for field in new_schema]
     select_list_str = ", \n".join(select_list)
-    return schema, select_list_str
+    return fields, select_list_str
 
 
-# ----------------------
-# Getting schema mapping
-# ----------------------
-
-
-def get_schema_mapping(
-    source_schema, client, project_id, source_dataset_id, table_name
-):
-    """Return mapping from original fields to new fields (list of tuples)
-
-    One field can be mapped to multiple fields.
-
-    Mapping is in format:
-    [
-        (field_1, [...]),
-        (field_2, [...]),
-      ...
-    ]
-    """
+def get_new_schema(source_schema, client, project_id, source_dataset_id, table_name):
+    """Return list of dicts containing new fields and some metadata"""
     table_ref = f"{project_id}.{source_dataset_id}.{table_name}"
     filtered_schema = [
         field
@@ -81,44 +52,64 @@ def get_schema_mapping(
         client, json_columns, table_ref
     )
 
-    schema_mapping = [
-        (field, map_to_new_fields(field, json_column_schemas))
-        for field in sorted_schema
-    ]
+    new_schema = []
+    for field in sorted_schema:
+        new_fields = map_to_new_fields(field, json_column_schemas)
 
-    return schema_mapping
+        # Temporarily skip RECORD types as error
+        # "Field <field_name> is type RECORD but has no schema" is raised.
+        new_fields = [f for f in new_fields if f["field"].field_type != "RECORD"]
+
+        new_schema.extend(new_fields)
+
+    return new_schema
 
 
-def map_to_new_fields(field, json_column_schemas):
-    original_field_transformed = transform_original_field(field)
+def map_to_new_fields(original_field, json_column_schemas):
+    original_field_transformed = transform_original_field(original_field)
+    select_str = get_select_str(original_field.name, None, None, None)
     new_fields = [
         {
             "field": original_field_transformed,
             "json_key": None,
-            "original_name": field.name,
+            "original_name": original_field.name,
             "special_data_type": None,
+            "select_str": select_str,
         }
     ]
 
     # In case of JSON column, possilby add multiple extra fields.
-    if field.name in json_column_schemas:
-        for key, schema_item in json_column_schemas[field.name].items():
-            data_type = schema_item["data_type"]
-            mode = schema_item["mode"]
+    if original_field.name in json_column_schemas:
+        for json_key, schema_item in json_column_schemas[original_field.name].items():
+            # Get name.
             special_data_type = schema_item["special_data_type"]
-
             if special_data_type == "csv":
-                raw_name = f"{field.name}_as_csv"
+                raw_name = f"{original_field.name}_as_csv"
             else:
-                raw_name = field.name if key is None else f"{field.name}__{key}"
-            name = _rename(raw_name)
+                raw_name = (
+                    original_field.name
+                    if json_key is None
+                    else f"{original_field.name}__{json_key}"
+                )
+            name = _clean_name(raw_name)
 
+            # Get select_str.
+            data_type = schema_item["data_type"]
+            select_str = get_select_str(
+                original_field.name,
+                data_type,
+                json_key,
+                special_data_type,
+            )
+
+            mode = schema_item["mode"]
             new_fields.append(
                 {
                     "field": bigquery.SchemaField(name, data_type, mode=mode),
-                    "json_key": key,
-                    "original_name": field.name,
+                    "json_key": json_key,
+                    "original_name": original_field.name,
                     "special_data_type": special_data_type,
+                    "select_str": select_str,
                 }
             )
 
@@ -127,69 +118,40 @@ def map_to_new_fields(field, json_column_schemas):
 
 def transform_original_field(field):
     if field.field_type == "RECORD":
+        # Handling of records is actually maybe not needed as BigQuery destination v2
+        # uses JSON columns instead of records. So this could maybe be removed.
         transformed_subfields = [transform_original_field(f) for f in field.fields]
         return bigquery.SchemaField(
-            name=_rename(field.name),
+            name=_clean_name(field.name),
             field_type=field.field_type,
             mode=field.mode,
             fields=transformed_subfields,
         )
     else:
         return bigquery.SchemaField(
-            name=_rename(field.name),
+            name=_clean_name(field.name),
             field_type=field.field_type,
             mode=field.mode,
         )
 
 
-def _rename(name):
+def _clean_name(name):
     snake_cased = convert_to_snake_case(name)
     customized = CUSTOM_RENAMINGS.get(snake_cased, snake_cased)
     return customized
 
 
-# ---------------
-# Process mapping
-# ---------------
-
-
-def get_new_fields_from_mapping(original_field, new_fields):
-    schema_fields = []
-    selects = []
-
-    for field_item in new_fields:
-        json_key = field_item["json_key"]
-        field = field_item["field"]
-
-        # Temporarily skip RECORD types as error
-        # "Field <field_name> is type RECORD but has no schema" is raised.
-        if field.field_type == "RECORD":
-            continue
-
-        schema_fields.append(field)
-
-        selection = get_select_str(
-            original_field.name,
-            field.field_type,
-            json_key,
-            field_item["special_data_type"],
-        )
-        selects.append(selection)
-
-    return schema_fields, selects
-
-
-def get_select_str(field_name, field_type, json_key, special_data_type):
+def get_select_str(original_field_name, json_field_type, json_key, special_data_type):
     if json_key:
-        selection = f"JSON_EXTRACT(`{field_name}`, '$.{json_key}')"
+        selection = f"JSON_EXTRACT(`{original_field_name}`, '$.{json_key}')"
         type_conversion_func = (
-            f"LAX_{field_type}"
-            if field_type in ("INT64", "BOOL", "FLOAT64", "STRING")
+            f"LAX_{json_field_type}"
+            if json_field_type in ("INT64", "BOOL", "FLOAT64", "STRING")
             else None
         )
         if type_conversion_func:
             return f"{type_conversion_func}({selection})"
     elif special_data_type == "csv":
-        return f"ARRAY_TO_STRING(JSON_EXTRACT_STRING_ARRAY(`{field_name}`, '$'), ',')"
+        return f"ARRAY_TO_STRING(JSON_EXTRACT_STRING_ARRAY(`{original_field_name}`, '$'), ',')"
 
-    return f"`{field_name}`"
+    return f"`{original_field_name}`"
