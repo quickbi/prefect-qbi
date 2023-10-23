@@ -11,23 +11,39 @@ CUSTOM_RENAMINGS = {
 def transform_table_schema(
     source_schema, client, project_id, source_dataset_id, table_name
 ):
-    """Return field list and SQL column selections for given table
+    """Return transformed schema metadata for given table
 
-    Field list is a list of SchemaFields.
-
-    Column selections are strings used in SQL select statement like
-    "some_regular_column,"
-    or
-    "JSON_EXTRACT(some_json_column, '$.some_key'),"
+    Metadata includes among other things:
+    - "fields": a list of SchemaFields.
+    - "select_list": a list of strings used in SQL select statement like:
+        "some_regular_column,"
+        or
+        "JSON_EXTRACT(some_json_column, '$.some_key'),"
     """
-    new_schema = get_new_schema(
+    new_schema, subtables = get_new_schema(
         source_schema, client, project_id, source_dataset_id, table_name
     )
 
-    fields = [field["field"] for field in new_schema]
-    select_list = [field["select_str"] for field in new_schema]
-    select_list_str = ", \n".join(select_list)
-    return fields, select_list_str
+    sub = []
+    if subtables:
+        for subtable_name, subtable_data in subtables.items():
+            cleaned_subtable_name = _clean_name(subtable_name)
+            sub.append(
+                {
+                    "table_name": f"{table_name}__{cleaned_subtable_name}",
+                    "json_column_name": subtable_name,
+                    "fields": [field["field"] for field in subtable_data],
+                    "select_list": [field["select_str"] for field in subtable_data],
+                }
+            )
+
+    result = {
+        "table_name": table_name,
+        "fields": [field["field"] for field in new_schema],
+        "select_list": [field["select_str"] for field in new_schema],
+        "subtables": sub,
+    }
+    return result
 
 
 def get_new_schema(source_schema, client, project_id, source_dataset_id, table_name):
@@ -51,47 +67,61 @@ def get_new_schema(source_schema, client, project_id, source_dataset_id, table_n
     )
 
     new_schema = []
+    subtables = {}
     for field in filtered_schema:
-        new_fields = map_to_new_fields(field, json_column_schemas)
-
-        # Temporarily skip RECORD types as error
-        # "Field <field_name> is type RECORD but has no schema" is raised.
-        new_fields = [f for f in new_fields if f["field"].field_type != "RECORD"]
-
+        new_fields, field_subtables = map_to_new_fields(field, json_column_schemas)
         new_schema.extend(new_fields)
+        subtables.update(field_subtables)
 
     new_schema_sorted = sorted(new_schema, key=_get_field_sort_key)
-    return new_schema_sorted
+    return new_schema_sorted, subtables
 
 
 def _get_field_sort_key(field):
-    if field["field"].field_type == "JSON":
-        return 1
     if field["field"].name == "_row_extracted_at":
-        return 2
+        return 1
     if field["field"].name.startswith("_airbyte"):
+        # There probably isn't "_airbyte*" fields anymore but if there are,
+        # they should be (almost) in the end.
+        return 2
+    if field["field"].field_type == "JSON":
         return 3
     return 0
 
 
 def map_to_new_fields(original_field, json_column_schemas):
+    new_fields = []
+    subtables = {}
+
     original_field_transformed = transform_original_field(original_field)
-    select_str = get_select_str(original_field.name, None, None, None)
-    new_fields = [
-        {
-            "field": original_field_transformed,
-            "json_key": None,
-            "original_name": original_field.name,
-            "special_data_type": None,
-            "select_str": select_str,
-        }
-    ]
+
+    include_original_field = True
+    json_column_schema = json_column_schemas.get(original_field.name, {})
+    json_array_schema = json_column_schema.get(None, {})
+    if json_array_schema.get("data_type") == "JSON" and json_array_schema.get(
+        "create_subtable"
+    ):
+        include_original_field = False
+
+    if include_original_field:
+        select_str = get_select_str(original_field.name, None, None, None)
+        new_fields.append(
+            {
+                "field": original_field_transformed,
+                "json_key": None,
+                "original_name": original_field.name,
+                "special_data_type": None,
+                "select_str": select_str,
+                "create_subtable": False,
+                "subtable_columns": None,
+            }
+        )
 
     # In case of JSON column, possilby add multiple extra fields.
     if original_field.name in json_column_schemas:
-        for json_key, schema_item in json_column_schemas[original_field.name].items():
+        for json_key, metadata in json_column_schemas[original_field.name].items():
             # Get name.
-            special_data_type = schema_item["special_data_type"]
+            special_data_type = metadata["special_data_type"]
             if special_data_type == "csv":
                 raw_name = f"{original_field.name}_as_csv"
             else:
@@ -103,7 +133,7 @@ def map_to_new_fields(original_field, json_column_schemas):
             name = _clean_name(raw_name)
 
             # Get select_str.
-            data_type = schema_item["data_type"]
+            data_type = metadata["data_type"]
             select_str = get_select_str(
                 original_field.name,
                 data_type,
@@ -111,18 +141,56 @@ def map_to_new_fields(original_field, json_column_schemas):
                 special_data_type,
             )
 
-            mode = schema_item["mode"]
-            new_fields.append(
-                {
-                    "field": bigquery.SchemaField(name, data_type, mode=mode),
-                    "json_key": json_key,
-                    "original_name": original_field.name,
-                    "special_data_type": special_data_type,
-                    "select_str": select_str,
-                }
-            )
+            mode = metadata["mode"]
+            item = {
+                "field": bigquery.SchemaField(name, data_type, mode=mode),
+                "json_key": json_key,
+                "original_name": original_field.name,
+                "special_data_type": special_data_type,
+                "select_str": select_str,
+                "create_subtable": metadata.get("create_subtable") is True,
+                "subtable_columns": metadata.get("subcolumns"),
+            }
 
-    return new_fields
+            is_array = json_key is None
+            if is_array:
+                if special_data_type == "csv":
+                    new_fields.append(item)
+
+                if data_type == "JSON":
+                    subtables[original_field.name] = [
+                        {
+                            "field": bigquery.SchemaField(
+                                _clean_name(col_name),
+                                col_metadata["data_type"],
+                                mode=col_metadata["mode"],
+                            ),
+                            "json_key": col_name,
+                            "select_str": _get_json_extract_select_str(
+                                "array_item", col_name, col_metadata["data_type"]
+                            ),
+                        }
+                        for col_name, col_metadata in metadata.get(
+                            "subcolumns", {}
+                        ).items()
+                    ]
+                elif data_type == "STRING":
+                    subtables[original_field.name] = [
+                        {
+                            "field": bigquery.SchemaField(
+                                _clean_name(original_field.name),
+                                metadata["data_type"],
+                                mode=metadata["mode"],
+                            ),
+                            "select_str": "LAX_STRING(array_item)",
+                            "json_key": original_field.name,
+                        }
+                    ]
+
+            else:
+                new_fields.append(item)
+
+    return new_fields, subtables
 
 
 def transform_original_field(field):
@@ -152,15 +220,25 @@ def _clean_name(name):
 
 def get_select_str(original_field_name, json_field_type, json_key, special_data_type):
     if json_key:
-        selection = f"JSON_EXTRACT(`{original_field_name}`, '$.{json_key}')"
-        type_conversion_func = (
-            f"LAX_{json_field_type}"
-            if json_field_type in ("INT64", "BOOL", "FLOAT64", "STRING")
-            else None
+        select_str = _get_json_extract_select_str(
+            original_field_name, json_key, json_field_type
         )
-        if type_conversion_func:
-            return f"{type_conversion_func}({selection})"
+        if select_str:
+            return select_str
     elif special_data_type == "csv":
         return f"ARRAY_TO_STRING(JSON_EXTRACT_STRING_ARRAY(`{original_field_name}`, '$'), ',')"
 
     return f"`{original_field_name}`"
+
+
+def _get_json_extract_select_str(original_field_name, json_key, json_field_type):
+    selection = f"JSON_EXTRACT(`{original_field_name}`, '$.{json_key}')"
+    type_conversion_func = (
+        f"LAX_{json_field_type}"
+        if json_field_type in ("INT64", "BOOL", "FLOAT64", "STRING")
+        else None
+    )
+    if type_conversion_func:
+        return f"{type_conversion_func}({selection})"
+
+    return selection

@@ -1,9 +1,38 @@
 import json
 
-SAMPLE_SIZE = 1000
+SAMPLE_SIZE = 3000
 
 
 def infer_columns_from_json_by_sampling(client, json_columns, table_ref):
+    """Return mapping from old column names to metadata dict describing new columns
+
+    Returns for example:
+    {
+        some_json_array_column: {
+            None: {
+                "data_type": "JSON",
+                "mode": "NULLABLE",
+                "special_data_type": None,
+                "create_subtable": True,
+                "subcolumns": {
+                    "key1": {
+                        "data_type": "INT64",
+                        "mode": "NULLABLE",
+                        "special_data_type": None,
+                    },
+                },
+            }
+        }
+        some_json_object_column: {
+            key_a: {
+                "data_type": "STRING",
+                "mode": "NULLABLE",
+                "special_data_type": "csv",
+            }
+        }
+    }
+
+    """
     if not json_columns:
         return {}
     json_columns_str = ", ".join(json_columns)
@@ -29,52 +58,96 @@ def infer_columns_from_json_by_sampling(client, json_columns, table_ref):
     json_column_schemas = {}
     for row in rows:
         for field_name, field_value in row.items():
-            field_schema = json_column_schemas.get(field_name, {})
+            schema = json_column_schemas.get(field_name, {})
             json_column_schemas[field_name] = analyze_json_value(
-                field_name, field_value, field_schema
+                field_name, field_value, schema
             )
 
     return json_column_schemas
 
 
-def analyze_json_value(field_name, field_value, previous_mapping):
+def analyze_json_value(field_name, field_value, schema):
     """Return mapping from keys to BigQuery data types and modes"""
-    subcolumns = {}
+    if field_value is None:
+        return schema
 
-    try:
-        obj = json.loads(field_value)
-    except (json.decoder.JSONDecodeError, TypeError):
-        # Doesn't seem like a json value so don't analyze it further. Let's
-        # just keep the original column.
-        # TODO: Probably some error should be raised and analyzing aborted.
-        return {}
+    obj = json.loads(field_value)
 
     if isinstance(obj, dict):
-        for key, val in obj.items():
-            this_type = get_bigquery_type(val)
-            previous_type = previous_mapping.get(key, {}).get("data_type", "STRING")
-            new_type = get_better_type(this_type, previous_type)
+        return analyze_dict(obj, schema)
+    elif isinstance(obj, list):
+        return analyze_list(obj, schema)
 
-            subcolumns[key] = {
-                "data_type": new_type,
+    raise RuntimeError(f"Unexpected JSON value in {field_name}.")
+
+
+def analyze_dict(obj, schema):
+    for key, val in obj.items():
+        this_type = get_bigquery_type(val)
+        previous_type = schema.get(key, {}).get("data_type", "STRING")
+        new_type = get_better_type(this_type, previous_type)
+
+        schema[key] = {
+            "data_type": new_type,
+            "mode": "NULLABLE",
+            "special_data_type": None,
+        }
+    return schema
+
+
+def analyze_list(obj, previous_schema):
+    json_column_schema = {}
+    types = set([get_bigquery_type(val) for val in obj])
+    if not types:
+        return previous_schema
+
+    if types == {"STRING"}:
+        new_schema = {
+            None: {
+                "data_type": "STRING",
                 "mode": "NULLABLE",
-                "special_data_type": None,
+                "special_data_type": "csv",
+                "create_subtable": True,
             }
+        }
+        if previous_schema and new_schema != previous_schema:
+            raise RuntimeError("Schema conflict")
+        return new_schema
 
-    # TODO: conflict handling, testing
-    # elif isinstance(obj, list):
-    #     types = set([get_bigquery_type(val) for val in obj])
-    #     if types == {"STRING"}:
-    #         subcolumns[None] = {
-    #             "data_type": "STRING",
-    #             "mode": "NULLABLE",
-    #             "special_data_type": "csv",
-    #         }
-    #         if previous_mapping and subcolumns != previous_mapping:
-    #             # TODO: Probably some error should be raised and analyzing aborted.
-    #             return {}
+    elif types == {"JSON"}:
+        subcolumns = previous_schema.get("subcolumns", {})
 
-    return subcolumns
+        for val in obj:
+            if val is None:
+                continue
+
+            subcolumns = analyze_dict(val, subcolumns)
+
+        json_column_schema[None] = {
+            "data_type": "JSON",
+            "mode": "NULLABLE",
+            "special_data_type": None,
+            "create_subtable": True,
+            "subcolumns": subcolumns,
+        }
+
+    elif len(types) == 1:
+        data_type = types.pop()
+        new_schema = {
+            None: {
+                "data_type": data_type,
+                "mode": "NULLABLE",
+                "create_subtable": True,
+            }
+        }
+        if previous_schema and new_schema != previous_schema:
+            raise RuntimeError("Schema conflict")
+        return new_schema
+    else:
+        print("Unhandled type:", types)
+        raise RuntimeError("Unhandled type.")
+
+    return json_column_schema
 
 
 def get_bigquery_type(value):
@@ -90,13 +163,14 @@ def get_bigquery_type(value):
         return "STRING"  # Assuming null values are represented as strings in JSON
     elif isinstance(value, dict):
         # Nested JSON
-        return "RECORD"
-    # TODO: Handle list type.
+        return "JSON"
+    elif isinstance(value, list):
+        return "JSON"
     else:
         return "STRING"  # Default to STRING if type is not recognized
 
 
-type_precedence = ["FLOAT64", "BOOL", "INT64", "RECORD", "STRING"]
+type_precedence = ["FLOAT64", "BOOL", "INT64", "JSON", "STRING"]
 type_precedence_dict = {value: index for index, value in enumerate(type_precedence)}
 
 
