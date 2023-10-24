@@ -8,9 +8,17 @@ from .utils import convert_to_snake_case, get_unique_temp_table_name
 JOIN_KEY_SOURCE_COLUMN = "_airbyte_raw_id"
 
 
+# TODO: instead of looking at dataset name this should be able to get source system name.
 def are_subtables_enabled(source_dataset_id):
     # Temporarily only enable this feature for HubSpot and Netvisor.
     return "netvisor" in source_dataset_id or "hub" in source_dataset_id
+
+
+# TODO: instead of looking at dataset name this should be able to get source system name.
+def _should_unnest_objects(source_dataset_id):
+    # Disable unnesting objects from HubSpot because Airbyte connector already
+    # does it (https://docs.airbyte.com/integrations/sources/hubspot#unnesting-top-level-properties).
+    return "hub" not in source_dataset_id
 
 
 def transform_dataset(
@@ -52,8 +60,14 @@ def transform_table(
     source_table_ref = f"{project_id}.{source_dataset_id}.{table_name}"
     source_table = client.get_table(source_table_ref)
     source_schema = source_table.schema
+    should_unnest_objects = _should_unnest_objects(source_dataset_id)
     transformed_schema = transform_table_schema(
-        source_schema, client, project_id, source_dataset_id, table_name
+        source_schema,
+        client,
+        project_id,
+        source_dataset_id,
+        table_name,
+        should_unnest_objects,
     )
 
     created_temp_table_refs = []

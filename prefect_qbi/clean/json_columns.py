@@ -3,7 +3,9 @@ import json
 SAMPLE_SIZE = 3000
 
 
-def infer_columns_from_json_by_sampling(client, json_columns, table_ref):
+def infer_columns_from_json_by_sampling(
+    client, json_columns, table_ref, should_unnest_objects
+):
     """Return mapping from old column names to metadata dict describing new columns
 
     Returns for example:
@@ -59,14 +61,21 @@ def infer_columns_from_json_by_sampling(client, json_columns, table_ref):
     for row in rows:
         for field_name, field_value in row.items():
             schema = json_column_schemas.get(field_name, {})
-            json_column_schemas[field_name] = analyze_json_value(
-                field_name, field_value, schema
-            )
+            try:
+                json_column_schemas[field_name] = analyze_json_value(
+                    field_name, field_value, schema, should_unnest_objects
+                )
+            except SkipAnalyzing:
+                continue
 
     return json_column_schemas
 
 
-def analyze_json_value(field_name, field_value, schema):
+class SkipAnalyzing(Exception):
+    pass
+
+
+def analyze_json_value(field_name, field_value, schema, should_unnest_objects):
     """Return mapping from keys to BigQuery data types and modes"""
     if field_value is None:
         return schema
@@ -74,6 +83,8 @@ def analyze_json_value(field_name, field_value, schema):
     obj = json.loads(field_value)
 
     if isinstance(obj, dict):
+        if not should_unnest_objects:
+            raise SkipAnalyzing()
         return analyze_dict(obj, schema)
     elif isinstance(obj, list):
         return analyze_list(obj, schema)

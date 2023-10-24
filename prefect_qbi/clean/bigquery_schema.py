@@ -9,7 +9,12 @@ CUSTOM_RENAMINGS = {
 
 
 def transform_table_schema(
-    source_schema, client, project_id, source_dataset_id, table_name
+    source_schema,
+    client,
+    project_id,
+    source_dataset_id,
+    table_name,
+    should_unnest_objects,
 ):
     """Return transformed schema metadata for given table
 
@@ -21,7 +26,12 @@ def transform_table_schema(
         "JSON_EXTRACT(some_json_column, '$.some_key'),"
     """
     new_schema, subtables = get_new_schema(
-        source_schema, client, project_id, source_dataset_id, table_name
+        source_schema,
+        client,
+        project_id,
+        source_dataset_id,
+        table_name,
+        should_unnest_objects,
     )
 
     sub = []
@@ -46,7 +56,14 @@ def transform_table_schema(
     return result
 
 
-def get_new_schema(source_schema, client, project_id, source_dataset_id, table_name):
+def get_new_schema(
+    source_schema,
+    client,
+    project_id,
+    source_dataset_id,
+    table_name,
+    should_unnest_objects,
+):
     """Return list of dicts containing new fields and some metadata"""
     table_ref = f"{project_id}.{source_dataset_id}.{table_name}"
     filtered_schema = [
@@ -63,7 +80,7 @@ def get_new_schema(source_schema, client, project_id, source_dataset_id, table_n
         field.name for field in filtered_schema if field.field_type == "JSON"
     ]
     json_column_schemas = infer_columns_from_json_by_sampling(
-        client, json_columns, table_ref
+        client, json_columns, table_ref, should_unnest_objects
     )
 
     new_schema = []
