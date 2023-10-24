@@ -11,7 +11,7 @@ JOIN_KEY_SOURCE_COLUMN = "_airbyte_raw_id"
 # TODO: instead of looking at dataset name this should be able to get source system name.
 def are_subtables_enabled(source_dataset_id):
     # Temporarily only enable this feature for HubSpot and Netvisor.
-    return "netvisor" in source_dataset_id or "hub" in source_dataset_id
+    return "netvisor" in source_dataset_id  # or "hub" in source_dataset_id
 
 
 # TODO: instead of looking at dataset name this should be able to get source system name.
