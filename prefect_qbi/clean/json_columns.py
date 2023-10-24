@@ -149,6 +149,7 @@ def analyze_list(obj, previous_schema):
                 "data_type": data_type,
                 "mode": "NULLABLE",
                 "create_subtable": True,
+                "special_data_type": None,
             }
         }
         if previous_schema and new_schema != previous_schema:
