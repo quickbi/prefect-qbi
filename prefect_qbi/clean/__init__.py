@@ -58,6 +58,7 @@ def transform_table(
 
     created_temp_table_refs = []
     table_mappings = []
+    add_join_key = bool(transformed_schema.get("subtables"))
 
     try:
         # Create temp version of main table and insert data to it.
@@ -68,10 +69,13 @@ def transform_table(
             destination_dataset_id,
             source_table,
             client,
+            add_join_key,
         )
         created_temp_table_refs.append(temp_table_ref)
         table_mappings.append((temp_table_ref, table_name_final))
-        _insert_data(transformed_schema, temp_table_ref, source_table_ref, client)
+        _insert_data(
+            transformed_schema, temp_table_ref, source_table_ref, client, add_join_key
+        )
 
         # Create temp version of possible subtables and insert data to them.
         for subtable_schema in transformed_schema["subtables"]:
@@ -85,6 +89,7 @@ def transform_table(
                 destination_dataset_id,
                 source_table,
                 client,
+                True,
             )
             created_temp_table_refs.append(temp_table_ref)
             table_mappings.append((temp_table_ref, table_name_final))
@@ -123,6 +128,7 @@ def _create_temp_table(
     destination_dataset_id,
     source_table,
     client,
+    add_join_key,
 ):
     table_name = transformed_schema["table_name"]
     table_name_snake_case = convert_to_snake_case(table_name)
@@ -133,11 +139,16 @@ def _create_temp_table(
     )
 
     # Define the schema for the new table.
-    destination_schema = [
-        bigquery.SchemaField(
-            f"_quickbi_{source_table.table_id}_join_key", "STRING", mode="REQUIRED"
-        )
-    ] + transformed_schema["fields"]
+    extra_fields = (
+        [
+            bigquery.SchemaField(
+                f"_quickbi_{source_table.table_id}_join_key", "STRING", mode="REQUIRED"
+            )
+        ]
+        if add_join_key
+        else []
+    )
+    destination_schema = extra_fields + transformed_schema["fields"]
 
     # Create table.
     destination_temp_table = bigquery.Table(
@@ -148,8 +159,10 @@ def _create_temp_table(
     return destination_temp_table_ref, table_name_final
 
 
-def _insert_data(transformed_schema, temp_table_ref, source_table_ref, client):
-    select_list_str = _get_select_list(transformed_schema)
+def _insert_data(
+    transformed_schema, temp_table_ref, source_table_ref, client, add_join_key
+):
+    select_list_str = _get_select_list(transformed_schema, add_join_key)
     query = f"""
         INSERT INTO `{temp_table_ref}`
         SELECT {select_list_str}
@@ -161,7 +174,7 @@ def _insert_data(transformed_schema, temp_table_ref, source_table_ref, client):
 def _insert_data_to_subtable(
     transformed_schema, temp_table_ref, source_table_ref, client
 ):
-    select_list_str = _get_select_list(transformed_schema)
+    select_list_str = _get_select_list(transformed_schema, True)
     json_column_name = transformed_schema["json_column_name"]
     query = f"""
         INSERT INTO `{temp_table_ref}`
@@ -172,8 +185,13 @@ def _insert_data_to_subtable(
     client.query(query).result()
 
 
-def _get_select_list(transformed_schema):
-    return ", \n".join([JOIN_KEY_SOURCE_COLUMN] + transformed_schema["select_list"])
+def _get_select_list(transformed_schema, add_join_key):
+    selects = (
+        [JOIN_KEY_SOURCE_COLUMN] + transformed_schema["select_list"]
+        if add_join_key
+        else transformed_schema["select_list"]
+    )
+    return ", \n".join(selects)
 
 
 def _delete_table(project_id, destination_dataset_id, table_name_final, client):
