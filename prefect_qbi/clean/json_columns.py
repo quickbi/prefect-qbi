@@ -113,16 +113,11 @@ def analyze_list(obj, previous_schema):
         return previous_schema
 
     if types == {"STRING"}:
-        new_schema = {
-            None: {
-                "data_type": "STRING",
-                "mode": "NULLABLE",
-                "special_data_type": "csv",
-                "create_subtable": True,
-            }
-        }
+        new_schema = _get_string_array_schema()
         if previous_schema and new_schema != previous_schema:
-            raise RuntimeError("Schema conflict")
+            previous_data_type = previous_schema.get(None, {}).get("data_type")
+            if not previous_data_type in ("INT64", "FLOAT64"):
+                raise RuntimeError("Schema conflict")
         return new_schema
 
     elif types == {"JSON"}:
@@ -153,6 +148,9 @@ def analyze_list(obj, previous_schema):
             }
         }
         if previous_schema and new_schema != previous_schema:
+            previous_data_type = previous_schema.get(None, {}).get("data_type")
+            if previous_data_type == "STRING":
+                return _get_string_array_schema()
             raise RuntimeError("Schema conflict")
         return new_schema
     else:
@@ -160,6 +158,17 @@ def analyze_list(obj, previous_schema):
         raise RuntimeError("Unhandled type.")
 
     return json_column_schema
+
+
+def _get_string_array_schema():
+    return {
+        None: {
+            "data_type": "STRING",
+            "mode": "NULLABLE",
+            "special_data_type": "csv",
+            "create_subtable": True,
+        }
+    }
 
 
 def get_bigquery_type(value):
