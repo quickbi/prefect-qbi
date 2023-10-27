@@ -88,6 +88,14 @@ def analyze_json_value(field_name, field_value, schema, should_unnest_objects):
         return analyze_dict(obj, schema)
     elif isinstance(obj, list):
         return analyze_list(obj, schema)
+    elif obj is None:
+        # Original value was JSON null instead of SQL null.
+        return schema
+    elif isinstance(obj, str):
+        # For example Pipedrive's persons.next_activity_time has json string
+        # values such as "13:30:00" for some reason. TODO: Maybe we should
+        # convert these kind of columns to regular strings?
+        return schema
 
     raise RuntimeError(f"Unexpected JSON value in {field_name}.")
 
