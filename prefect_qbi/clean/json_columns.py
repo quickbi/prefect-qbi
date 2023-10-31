@@ -1,6 +1,7 @@
 import json
 
-SAMPLE_SIZE = 3000
+SAMPLE_SIZE = 10000
+INITIAL_SAMPLE_SIZE = 100000
 
 
 def infer_columns_from_json_by_sampling(
@@ -37,38 +38,44 @@ def infer_columns_from_json_by_sampling(
     """
     if not json_columns:
         return {}
-    json_columns_str = ", ".join(json_columns)
 
+    schemas = {}
+    for json_column in json_columns:
+        col_schema = infer_schema_for_column(
+            client, json_column, table_ref, should_unnest_objects
+        )
+        schemas[json_column] = col_schema
+
+    return schemas
+
+
+def infer_schema_for_column(client, json_column, table_ref, should_unnest_objects):
     query = f"""
-        WITH batched_rows AS (
-          (SELECT {json_columns_str} FROM `{table_ref}` LIMIT {SAMPLE_SIZE * 2} OFFSET 0)
-          UNION ALL
-          (SELECT {json_columns_str} FROM `{table_ref}` LIMIT {SAMPLE_SIZE * 2} OFFSET 10000)
-          UNION ALL
-          (SELECT {json_columns_str} FROM `{table_ref}` LIMIT {SAMPLE_SIZE * 2} OFFSET 100000)
+        WITH initial_sample AS (
+          SELECT {json_column}
+          FROM `{table_ref}`
+          WHERE {json_column} is not null
+          LIMIT {INITIAL_SAMPLE_SIZE}
         )
 
         SELECT *
-        FROM batched_rows
+        FROM initial_sample
         ORDER BY RAND()
         LIMIT {SAMPLE_SIZE};
     """
-    query_job = client.query(query)
-    rows = list(query_job)
+    rows = client.query(query)
 
-    # Loop through the sampled rows to infer the schema.
-    json_column_schemas = {}
+    schema = {}
     for row in rows:
-        for field_name, field_value in row.items():
-            schema = json_column_schemas.get(field_name, {})
-            try:
-                json_column_schemas[field_name] = analyze_json_value(
-                    field_name, field_value, schema, should_unnest_objects
-                )
-            except SkipAnalyzing:
-                continue
+        value = row.get(json_column)
+        try:
+            schema = analyze_json_value(
+                json_column, value, schema, should_unnest_objects
+            )
+        except SkipAnalyzing:
+            continue
 
-    return json_column_schemas
+    return schema
 
 
 class SkipAnalyzing(Exception):
