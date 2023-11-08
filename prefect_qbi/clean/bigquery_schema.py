@@ -232,7 +232,8 @@ def transform_original_field(field):
 
 
 def _clean_name(name):
-    snake_cased = convert_to_snake_case(name)
+    dots_removed = name.replace(".", "_")
+    snake_cased = convert_to_snake_case(dots_removed)
     customized = CUSTOM_RENAMINGS.get(snake_cased, snake_cased)
     return customized
 
