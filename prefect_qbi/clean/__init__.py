@@ -5,8 +5,6 @@ from .bigquery_schema import transform_table_schema
 from .bigquery_utils import create_dataset_with_location, get_dataset_location
 from .utils import convert_to_snake_case, get_unique_temp_table_name
 
-JOIN_KEY_SOURCE_COLUMN = "_airbyte_raw_id"
-
 
 # TODO: instead of looking at dataset name this should be able to get source system name.
 def are_subtables_enabled(source_dataset_id):
@@ -79,13 +77,12 @@ def transform_table(
     try:
         # Create temp version of main table and insert data to it.
         temp_table_ref, table_name_final = _create_temp_table(
-            table_prefix,
-            transformed_schema,
-            project_id,
-            destination_dataset_id,
-            source_table,
-            client,
-            add_join_key,
+            table_prefix=table_prefix,
+            transformed_schema=transformed_schema,
+            project_id=project_id,
+            destination_dataset_id=destination_dataset_id,
+            source_table=source_table,
+            client=client,
         )
         created_temp_table_refs.append(temp_table_ref)
         table_mappings.append((temp_table_ref, table_name_final))
@@ -99,13 +96,12 @@ def transform_table(
                 break
 
             temp_table_ref, table_name_final = _create_temp_table(
-                table_prefix,
-                subtable_schema,
-                project_id,
-                destination_dataset_id,
-                source_table,
-                client,
-                True,
+                table_prefix=table_prefix,
+                transformed_schema=subtable_schema,
+                project_id=project_id,
+                destination_dataset_id=destination_dataset_id,
+                source_table=source_table,
+                client=client,
             )
             created_temp_table_refs.append(temp_table_ref)
             table_mappings.append((temp_table_ref, table_name_final))
@@ -144,7 +140,6 @@ def _create_temp_table(
     destination_dataset_id,
     source_table,
     client,
-    add_join_key,
 ):
     table_name = transformed_schema["table_name"]
     table_name_snake_case = convert_to_snake_case(table_name)
@@ -153,18 +148,7 @@ def _create_temp_table(
     destination_temp_table_ref = (
         f"{project_id}.{destination_dataset_id}.{temp_table_id}"
     )
-
-    # Define the schema for the new table.
-    extra_fields = (
-        [
-            bigquery.SchemaField(
-                f"_quickbi_{source_table.table_id}_join_key", "STRING", mode="REQUIRED"
-            )
-        ]
-        if add_join_key
-        else []
-    )
-    destination_schema = extra_fields + transformed_schema["fields"]
+    destination_schema = transformed_schema["fields"]
 
     # Create table.
     destination_temp_table = bigquery.Table(
@@ -178,7 +162,7 @@ def _create_temp_table(
 def _insert_data(
     transformed_schema, temp_table_ref, source_table_ref, client, add_join_key
 ):
-    select_list_str = _get_select_list(transformed_schema, add_join_key)
+    select_list_str = _get_select_list(transformed_schema)
     query = f"""
         INSERT INTO `{temp_table_ref}`
         SELECT {select_list_str}
@@ -190,7 +174,7 @@ def _insert_data(
 def _insert_data_to_subtable(
     transformed_schema, temp_table_ref, source_table_ref, client
 ):
-    select_list_str = _get_select_list(transformed_schema, True)
+    select_list_str = _get_select_list(transformed_schema)
     json_column_name = transformed_schema["json_column_name"]
     query = f"""
         INSERT INTO `{temp_table_ref}`
@@ -201,13 +185,8 @@ def _insert_data_to_subtable(
     client.query(query).result()
 
 
-def _get_select_list(transformed_schema, add_join_key):
-    selects = (
-        [JOIN_KEY_SOURCE_COLUMN] + transformed_schema["select_list"]
-        if add_join_key
-        else transformed_schema["select_list"]
-    )
-    return ", \n".join(selects)
+def _get_select_list(transformed_schema):
+    return ", \n".join(transformed_schema["select_list"])
 
 
 def _delete_table(project_id, destination_dataset_id, table_name_final, client):

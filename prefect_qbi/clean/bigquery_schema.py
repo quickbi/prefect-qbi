@@ -47,13 +47,15 @@ def transform_table_schema(
                 }
             )
 
-    result = {
+    result_schema = {
         "table_name": table_name,
         "fields": [field["field"] for field in new_schema],
         "select_list": [field["select_str"] for field in new_schema],
         "subtables": sub,
     }
-    return result
+
+    result_schema = _add_extra_fields(result_schema, table_name)
+    return result_schema
 
 
 def get_new_schema(
@@ -259,3 +261,32 @@ def _get_json_extract_select_str(original_field_name, json_key, json_field_type)
         return f"{type_conversion_func}({selection})"
 
     return selection
+
+
+def _add_extra_fields(schema, table_name):
+    if schema["subtables"]:
+        _add_join_key(schema, table_name)
+
+        for subtable in schema["subtables"]:
+            _add_join_key(subtable, table_name)
+            _add_row_extracted_at(subtable)
+
+    return schema
+
+
+def _add_join_key(schema_obj, table_name):
+    schema_obj["fields"] = [
+        bigquery.SchemaField(
+            f"_quickbi_{table_name}_join_key", "STRING", mode="REQUIRED"
+        )
+    ] + schema_obj["fields"]
+    schema_obj["select_list"] = ["_airbyte_raw_id"] + schema_obj["select_list"]
+    return schema_obj
+
+
+def _add_row_extracted_at(schema_obj):
+    schema_obj["fields"] = schema_obj["fields"] + [
+        bigquery.SchemaField(f"_row_extracted_at", "TIMESTAMP", mode="REQUIRED")
+    ]
+    schema_obj["select_list"] = schema_obj["select_list"] + ["_airbyte_extracted_at"]
+    return schema_obj
