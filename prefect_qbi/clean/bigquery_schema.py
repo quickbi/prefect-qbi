@@ -54,7 +54,7 @@ def transform_table_schema(
         "subtables": sub,
     }
 
-    result_schema = _add_extra_fields(result_schema, table_name)
+    result_schema = _add_extra_fields(result_schema, table_name, project_id)
     return result_schema
 
 
@@ -264,7 +264,13 @@ def _get_json_extract_select_str(original_field_name, json_key, json_field_type)
     return selection
 
 
-def _add_extra_fields(schema, table_name):
+def _add_extra_fields(schema, table_name, project_id):
+    if (
+        project_id in ("quickbi-demoexte2168", "quickbi-eerontok6534")
+        and table_name == "users"
+    ):
+        _add_page_name(schema)
+
     if schema["subtables"]:
         _add_join_key(schema, table_name)
 
@@ -275,19 +281,32 @@ def _add_extra_fields(schema, table_name):
     return schema
 
 
-def _add_join_key(schema_obj, table_name):
-    schema_obj["fields"] = [
+def _add_join_key(obj, table_name):
+    obj["fields"] = [
         bigquery.SchemaField(
             f"_quickbi_{table_name}_join_key", "STRING", mode="REQUIRED"
         )
-    ] + schema_obj["fields"]
-    schema_obj["select_list"] = ["_airbyte_raw_id"] + schema_obj["select_list"]
-    return schema_obj
+    ] + obj["fields"]
+    obj["select_list"] = ["_airbyte_raw_id"] + obj["select_list"]
+    return obj
 
 
-def _add_row_extracted_at(schema_obj):
-    schema_obj["fields"] = schema_obj["fields"] + [
+def _add_row_extracted_at(obj):
+    obj["fields"] = obj["fields"] + [
         bigquery.SchemaField(f"_row_extracted_at", "TIMESTAMP", mode="REQUIRED")
     ]
-    schema_obj["select_list"] = schema_obj["select_list"] + ["_airbyte_extracted_at"]
-    return schema_obj
+    obj["select_list"] = obj["select_list"] + ["_airbyte_extracted_at"]
+    return obj
+
+
+def _add_page_name(obj):
+    index = 1
+    obj["fields"] = (
+        obj["fields"][0:index]
+        + [bigquery.SchemaField(f"page_name", "STRING", mode="REQUIRED")]
+        + obj["fields"][index:]
+    )
+    obj["select_list"] = (
+        obj["select_list"][0:index] + ["'Quickbi'"] + obj["select_list"][index:]
+    )
+    return obj
