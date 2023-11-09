@@ -52,9 +52,9 @@ def infer_columns_from_json_by_sampling(
 def infer_schema_for_column(client, json_column, table_ref, should_unnest_objects):
     query = f"""
         WITH initial_sample AS (
-          SELECT {json_column}
+          SELECT `{json_column}`
           FROM `{table_ref}`
-          WHERE {json_column} is not null
+          WHERE `{json_column}` is not null
           LIMIT {INITIAL_SAMPLE_SIZE}
         )
 
