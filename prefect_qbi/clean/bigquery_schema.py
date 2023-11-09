@@ -1,4 +1,5 @@
 from google.cloud import bigquery
+from slugify import slugify
 
 from .json_columns import infer_columns_from_json_by_sampling
 from .utils import convert_to_snake_case
@@ -232,10 +233,10 @@ def transform_original_field(field):
 
 
 def _clean_name(name):
-    dots_removed = name.replace(".", "_")
-    snake_cased = convert_to_snake_case(dots_removed)
+    snake_cased = convert_to_snake_case(name)
     customized = CUSTOM_RENAMINGS.get(snake_cased, snake_cased)
-    return customized
+    slugified = slugify(customized, separator="_")
+    return slugified
 
 
 def get_select_str(original_field_name, json_field_type, json_key, special_data_type):
@@ -252,7 +253,7 @@ def get_select_str(original_field_name, json_field_type, json_key, special_data_
 
 
 def _get_json_extract_select_str(original_field_name, json_key, json_field_type):
-    selection = f"JSON_EXTRACT(`{original_field_name}`, '$.{json_key}')"
+    selection = f"""JSON_EXTRACT(`{original_field_name}`, "$['{json_key}']")"""
     type_conversion_func = (
         f"LAX_{json_field_type}"
         if json_field_type in ("INT64", "BOOL", "FLOAT64", "STRING")
