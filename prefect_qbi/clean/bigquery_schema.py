@@ -1,3 +1,5 @@
+import re
+
 from google.cloud import bigquery
 from slugify import slugify
 
@@ -38,7 +40,7 @@ def transform_table_schema(
     sub = []
     if subtables:
         for subtable_name, subtable_data in subtables.items():
-            cleaned_subtable_name = _clean_name(subtable_name)
+            cleaned_subtable_name = clean_name(subtable_name)
             sub.append(
                 {
                     "table_name": f"{table_name}__{cleaned_subtable_name}",
@@ -150,7 +152,7 @@ def map_to_new_fields(original_field, json_column_schemas):
                     if json_key is None
                     else f"{original_field.name}__{json_key}"
                 )
-            name = _clean_name(raw_name)
+            name = clean_name(raw_name)
 
             # Get select_str.
             data_type = metadata["data_type"]
@@ -181,7 +183,7 @@ def map_to_new_fields(original_field, json_column_schemas):
                     subtables[original_field.name] = [
                         {
                             "field": bigquery.SchemaField(
-                                _clean_name(col_name),
+                                clean_name(col_name),
                                 col_metadata["data_type"],
                                 mode=col_metadata["mode"],
                             ),
@@ -198,7 +200,7 @@ def map_to_new_fields(original_field, json_column_schemas):
                     subtables[original_field.name] = [
                         {
                             "field": bigquery.SchemaField(
-                                _clean_name(original_field.name),
+                                clean_name(original_field.name),
                                 metadata["data_type"],
                                 mode=metadata["mode"],
                             ),
@@ -219,24 +221,39 @@ def transform_original_field(field):
         # uses JSON columns instead of records. So this could maybe be removed.
         transformed_subfields = [transform_original_field(f) for f in field.fields]
         return bigquery.SchemaField(
-            name=_clean_name(field.name),
+            name=clean_name(field.name),
             field_type=field.field_type,
             mode=field.mode,
             fields=transformed_subfields,
         )
     else:
         return bigquery.SchemaField(
-            name=_clean_name(field.name),
+            name=clean_name(field.name),
             field_type=field.field_type,
             mode=field.mode,
         )
 
 
-def _clean_name(name):
+def clean_name(name):
     snake_cased = convert_to_snake_case(name)
     customized = CUSTOM_RENAMINGS.get(snake_cased, snake_cased)
-    slugified = slugify(customized, separator="_")
+    slugified = _custom_slugify(customized)
     return slugified
+
+
+def _custom_slugify(text):
+    """Slugify text without messing with underscores"""
+    parts = re.split(r"(_+)", text)
+    slugified_parts = [
+        slugify(part, separator="_") if not part.startswith("_") else part
+        for part in parts
+    ]
+    slugified_text = "".join(slugified_parts)
+
+    # Make sure there are no more than two subsequent underscores.
+    extra_underscores_removed = re.sub(r"_{3,}", "__", slugified_text)
+
+    return extra_underscores_removed
 
 
 def get_select_str(original_field_name, json_field_type, json_key, special_data_type):
