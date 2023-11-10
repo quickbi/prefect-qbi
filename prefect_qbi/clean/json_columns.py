@@ -108,6 +108,10 @@ def analyze_json_value(field_name, field_value, schema, should_unnest_objects):
 
 
 def analyze_dict(obj, schema):
+    if isinstance(obj, list):
+        # Sometimes a column with dicts can have also some lists. Skip these cases.
+        raise SkipAnalyzing()
+
     for key, val in obj.items():
         this_type = get_bigquery_type(val)
         previous_type = schema.get(key, {}).get("data_type", "STRING")
