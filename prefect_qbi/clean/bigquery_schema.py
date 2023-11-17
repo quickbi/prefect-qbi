@@ -100,15 +100,22 @@ def get_new_schema(
 
 
 def _get_field_sort_key(field):
+    if field["field"].name == "username":
+        # Temporarily put username first.
+        return 0
+    if field["field"].name == "profile_picture_url":
+        # Temporary
+        return 2
+
     if field["field"].name == "_row_extracted_at":
-        return 1
+        return 3
     if field["field"].name.startswith("_airbyte"):
         # There probably isn't "_airbyte*" fields anymore but if there are,
         # they should be (almost) in the end.
-        return 2
+        return 4
     if field["field"].field_type == "JSON":
-        return 3
-    return 0
+        return 5
+    return 1
 
 
 def map_to_new_fields(original_field, json_column_schemas):
