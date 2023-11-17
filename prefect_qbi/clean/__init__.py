@@ -90,6 +90,16 @@ def transform_table(
             transformed_schema, temp_table_ref, source_table_ref, client, add_join_key
         )
 
+        _add_demo_table(
+            project_id,
+            table_name,
+            table_prefix,
+            destination_dataset_id,
+            source_table,
+            client,
+            source_table_ref,
+        )
+
         # Create temp version of possible subtables and insert data to them.
         for subtable_schema in transformed_schema["subtables"]:
             if not are_subtables_enabled(source_dataset_id):
@@ -131,6 +141,65 @@ def transform_table(
 
         print(f"Error processing table '{table_name}': {e}")
         raise e
+
+
+def _add_demo_table(
+    project_id,
+    table_name,
+    table_prefix,
+    destination_dataset_id,
+    source_table,
+    client,
+    source_table_ref,
+):
+    if not (
+        project_id in ("quickbi-demoexte2168", "quickbi-eerontok6534")
+        and table_name == "users"
+    ):
+        return
+
+    transformed_schema = {
+        "fields": [
+            bigquery.SchemaField(
+                "instagram_business_account",
+                "STRING",
+                "NULLABLE",
+                None,
+                None,
+                (),
+                None,
+            ),
+            bigquery.SchemaField("page", "STRING", "REQUIRED", None, None, (), None),
+            bigquery.SchemaField(
+                "_row_extracted_at",
+                "TIMESTAMP",
+                "REQUIRED",
+                None,
+                None,
+                (),
+                None,
+            ),
+        ],
+        "select_list": [
+            "'quickbiofficial'",
+            "'Quickbi'",
+            "`_airbyte_extracted_at`",
+        ],
+        "subtables": [],
+        "table_name": "business_accounts_and_linked_pages",
+    }
+
+    temp_table_ref, table_name_final = _create_temp_table(
+        table_prefix=table_prefix,
+        transformed_schema=transformed_schema,
+        project_id=project_id,
+        destination_dataset_id=destination_dataset_id,
+        source_table=source_table,
+        client=client,
+    )
+    _insert_data(transformed_schema, temp_table_ref, source_table_ref, client, False)
+    _delete_table(project_id, destination_dataset_id, table_name_final, client)
+    _rename_temp_to_original(temp_table_ref, table_name_final, project_id, client)
 
 
 def _create_temp_table(
