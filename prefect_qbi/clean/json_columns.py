@@ -140,7 +140,7 @@ def analyze_list(obj, previous_schema):
         return new_schema
 
     elif types == {"JSON"}:
-        subcolumns = previous_schema.get("subcolumns", {})
+        subcolumns = previous_schema.get(None, {}).get("subcolumns", {})
 
         for val in obj:
             if val is None:
