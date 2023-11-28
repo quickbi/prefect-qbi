@@ -4,7 +4,9 @@ import time
 
 
 def convert_to_snake_case(text):
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", text).lower()
+    text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", text)
+    text = re.sub(r"([a-z])([A-Z])", r"\1_\2", text)
+    return text.lower()
 
 
 def get_unique_temp_table_name(base_name):

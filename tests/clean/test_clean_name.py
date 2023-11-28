@@ -11,6 +11,10 @@ class TestCleanName:
             ("properties__$set_once", "properties__set_once"),
             ("with.dot", "with_dot"),
             ("___too&_many_$under___scores", "__too_many_under__scores"),
+            ("PersonGUID", "person_guid"),
+            ("PersonGUIDTest", "person_guid_test"),
+            ("RFIDNumber", "rfid_number"),
+            ("XValue", "x_value"),
         ],
     )
     def test_clean_name(self, name, expected):
