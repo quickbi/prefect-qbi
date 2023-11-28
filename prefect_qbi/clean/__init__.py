@@ -8,9 +8,6 @@ from .utils import convert_to_snake_case, get_unique_temp_table_name
 
 # TODO: instead of looking at dataset name this should be able to get source system name.
 def are_subtables_enabled(source_dataset_id):
-    # Temporarily disable for Facebook and Instagram.
-    if "facebook" in source_dataset_id or "instagram" in source_dataset_id:
-        return False
     return True
 
 
