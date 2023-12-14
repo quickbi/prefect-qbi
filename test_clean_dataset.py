@@ -17,7 +17,7 @@ from prefect_qbi.clean import transform_dataset
 def test_transform_dataset(
     project_id, source_dataset_id, destination_dataset_id, table_prefix
 ):
-    client = bigquery.Client()
+    client = bigquery.Client(project=project_id)
     transform_dataset(
         client,
         project_id,

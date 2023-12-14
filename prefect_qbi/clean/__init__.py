@@ -1,7 +1,7 @@
 from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 
-from .bigquery_schema import transform_table_schema
+from .bigquery_schema import clean_name, transform_table_schema
 from .bigquery_utils import create_dataset_with_location, get_dataset_location
 from .utils import convert_to_snake_case, get_unique_temp_table_name
 
@@ -96,6 +96,21 @@ def transform_table(
             client,
             source_table_ref,
         )
+
+        if "m_files" in source_dataset_id and table_name == "objects_files_contents":
+            from .m_files_transform import transform_json_column_to_tables
+
+            transform_json_column_to_tables(
+                client,
+                project_id,
+                source_dataset_id,
+                destination_dataset_id,
+                table_name,
+                ["ObjectType", "ObjectID", "FileID"],
+                "FileName",
+                "ContentJson",
+                table_prefix,
+            )
 
         # Create temp version of possible subtables and insert data to them.
         for subtable_schema in transformed_schema["subtables"]:
