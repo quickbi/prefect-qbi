@@ -15,66 +15,56 @@ def transform_json_column_to_tables(
     source_index_columns,
     source_name_column,
     source_value_column,
-    table_prefix,
 ):
-    index_query = dedent(
-        f"""\
+    index_query = f"""
         SELECT `{'`, `'.join(source_index_columns)}`, `{source_name_column}`
-        FROM `{project_id}`.`{source_dataset_id}`.`{source_table_name}`
-        WHERE `{source_value_column}` IS NOT NULL"""
-    )
-    rows = client.query(index_query)
-    for row in rows:
-        value_query = dedent(
-            f"""\
-            SELECT `{source_value_column}__unnested`
-            FROM `{project_id}`.`{source_dataset_id}`.`{source_table_name}`
-            JOIN UNNEST(JSON_QUERY_ARRAY(`{source_value_column}`, '$')) AS `{source_value_column}__unnested`
-            WHERE {' AND '.join(f'`{c}` = {row[c]!r}' for c in source_index_columns)}"""
+        FROM `{project_id}.{source_dataset_id}.{source_table_name}`
+        WHERE `{source_value_column}` IS NOT NULL
+    """
+
+    for index in client.query(index_query):
+        value_query = f"""
+            SELECT PARSE_JSON(`{source_value_column}__unnested`) AS `array_item`
+            FROM `{project_id}.{source_dataset_id}.{source_table_name}`
+            CROSS JOIN UNNEST(JSON_QUERY_ARRAY(`{source_value_column}`)) AS `{source_value_column}__unnested`
+            WITH OFFSET AS `{source_value_column}__offset`
+            WHERE {' AND '.join(f'`{c}` = {index[c]!r}' for c in source_index_columns)}
+            ORDER BY `{source_value_column}__offset`
+        """
+        schema = infer_schema_from_json_values(
+            source_value_column,
+            (row["array_item"] for row in client.query(value_query)),
+            True,
         )
-        values = (
-            row[f"{source_value_column}__unnested"] for row in client.query(value_query)
-        )
 
-        fields = []
-        select_list = []
-
-        schema = infer_schema_from_json_values(values, True)
-
-        field_declarations = []
+        field_schemas = []
         field_selectors = []
 
-        for key, value in schema.items():
-            field_data_type = value["data_type"]
-            field_mode = value["mode"]
+        # Subtables are currently not supported, because Excel files cannot contain such data.
 
-            field_declaration = f"`{clean_name(key)}` {field_data_type}"
-            if field_mode == "REQUIRED":
-                field_declaration += " NOT NULL"
-            field_declarations.append(field_declaration)
+        for field_name, field_spec in schema.items():
+            field_data_type = field_spec["data_type"]
+            field_mode = field_spec["mode"]
 
-            field_selector = f"""SAFE_CAST(JSON_QUERY(`{source_value_column}__unnested`, '$."{key}"') AS {field_data_type})"""
-            field_selector = f"{field_selector} AS `{clean_name(key)}`"
+            field_schema = bigquery.SchemaField(
+                clean_name(field_name),
+                field_data_type,
+                mode=field_mode,
+            )
+            field_schemas.append(field_schema)
+
+            field_selector = f"""JSON_QUERY(`array_item`, '$."{field_name}"')"""
+            if field_data_type in ("INT64", "BOOL", "FLOAT64", "STRING"):
+                field_selector = f"LAX_{field_data_type}({field_selector})"
             field_selectors.append(field_selector)
 
-        field_declarations = ", \n".join(field_declarations)
-        field_selectors = ", \n".join(field_selectors)
-
         destination_table_name = clean_name(
-            f"{table_prefix}__{row[source_name_column]}__{'_'.join(str(row[c]) for c in source_index_columns)}"
+            f"{index[source_name_column]}__{'_'.join(str(index[c]) for c in source_index_columns)}"
         )
 
-        query = "\n".join(
-            [
-                f"CREATE OR REPLACE TABLE `{project_id}`.`{destination_dataset_id}`.`{destination_table_name}` (",
-                indent(field_declarations, " " * 4),
-                ") AS ",
-                "SELECT",
-                indent(field_selectors, " " * 4),
-                "FROM (",
-                indent(value_query, " " * 4),
-                ");",
-            ]
-        )
-
-        client.query(query).result()
+        yield {
+            "name": destination_table_name,
+            "schema_list": field_schemas,
+            "query_select_list": field_selectors,
+            "query_from": f"({value_query})",
+        }
