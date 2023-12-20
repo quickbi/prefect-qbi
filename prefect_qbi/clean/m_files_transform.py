@@ -16,6 +16,7 @@ def transform_json_column_to_tables(
     source_name_column,
     source_value_column,
 ):
+    # Get values for each column specified in `source_index_columns`.
     index_query = f"""
         SELECT `{'`, `'.join(source_index_columns)}`, `{source_name_column}`
         FROM `{project_id}.{source_dataset_id}.{source_table_name}`
@@ -23,6 +24,10 @@ def transform_json_column_to_tables(
     """
 
     for index in client.query(index_query):
+        # Get records from the column `source_value_column` for the row with the matching index.
+        # The column specified by `source_value_column` should contain an array of records stored
+        # in JSON-string form. The records are unnested, and the original order is preserved
+        # by ordering the results by the row offset.
         value_query = f"""
             SELECT PARSE_JSON(`{source_value_column}__unnested`) AS `array_item`
             FROM `{project_id}.{source_dataset_id}.{source_table_name}`
