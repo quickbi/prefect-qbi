@@ -78,6 +78,18 @@ def infer_schema_for_column(client, json_column, table_ref, should_unnest_object
     return schema
 
 
+def infer_schema_from_json_values(json_column, values, should_unnest_objects):
+    schema = {}
+    for value in values:
+        try:
+            schema = analyze_json_value(
+                json_column, value, schema, should_unnest_objects
+            )
+        except SkipAnalyzing:
+            continue
+    return schema
+
+
 class SkipAnalyzing(Exception):
     pass
 

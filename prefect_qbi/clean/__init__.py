@@ -1,8 +1,17 @@
-from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 
 from .bigquery_schema import transform_table_schema
-from .bigquery_utils import create_dataset_with_location, get_dataset_location
+from .bigquery_utils import (
+    create_dataset_with_location,
+    create_table_with_schema,
+    delete_table,
+    get_dataset_location,
+    get_dataset_table_names,
+    get_table_schema,
+    insert_query_result_to_table,
+    rename_table,
+)
+from .m_files_transform import transform_json_column_to_tables
 from .utils import convert_to_snake_case, get_unique_temp_table_name
 
 
@@ -19,125 +28,197 @@ def _should_unnest_objects(source_dataset_id):
 
 
 def transform_dataset(
-    client,
-    project_id,
-    source_dataset_id,
-    destination_dataset_id,
-    table_prefix,
+    client: bigquery.Client,
+    project_id: str,
+    source_dataset_id: str,
+    destination_dataset_id: str,
+    table_prefix: str,
 ):
+    # Create destination dataset with source dataset's location.
     source_location = get_dataset_location(client, project_id, source_dataset_id)
     create_dataset_with_location(
         client, project_id, destination_dataset_id, source_location
     )
-    source_dataset_ref = f"{project_id}.{source_dataset_id}"
-    source_tables = client.list_tables(source_dataset_ref)
 
-    for table in source_tables:
+    for source_table_name in get_dataset_table_names(
+        client, project_id, source_dataset_id
+    ):
         transform_table(
             client,
             project_id,
             source_dataset_id,
             destination_dataset_id,
-            table.table_id,
-            source_location,
+            source_table_name,
             table_prefix,
         )
 
 
 def transform_table(
+    client: bigquery.Client,
+    project_id: str,
+    source_dataset_id: str,
+    destination_dataset_id: str,
+    source_table_name: str,
+    table_prefix: str,
+):
+    table_mappings = []
+
+    try:
+        # Create and populate temp tables.
+        for destination_table_spec in _iter_destination_table_specs(
+            client,
+            project_id,
+            source_dataset_id,
+            source_table_name,
+            destination_dataset_id,
+        ):
+            destination_table_name = f"{table_prefix}__{destination_table_spec['name']}"
+            temp_destination_table_name = get_unique_temp_table_name(
+                destination_table_name
+            )
+            table_mappings.append((temp_destination_table_name, destination_table_name))
+            _make_temp_destination_table(
+                client,
+                project_id,
+                destination_dataset_id,
+                temp_destination_table_name,
+                destination_table_spec,
+            )
+
+        _add_demo_tables(
+            project_id,
+            source_table_name,
+            table_prefix,
+            destination_dataset_id,
+            client,
+            source_dataset_id,
+            source_table_name,
+        )
+
+        # Remove previous versions of the final tables.
+        for _, destination_table_name in table_mappings:
+            delete_table(
+                client,
+                project_id,
+                destination_dataset_id,
+                destination_table_name,
+            )
+
+        # Rename temp tables to be the latest final tables.
+        # Note: This is done only after all tables have been removed (previous step),
+        # to prevent a state, in which both old and new tables exist simultaneously.
+        for temp_destination_table_name, destination_table_name in table_mappings:
+            rename_table(
+                client,
+                project_id,
+                destination_dataset_id,
+                temp_destination_table_name,
+                destination_table_name,
+            )
+
+        print(f"Table '{source_table_name}' transformed.")
+
+    except Exception as e:
+        # Remove temp tables on error. The final tables should be left unchanged.
+        for temp_destination_table_name, _ in table_mappings:
+            delete_table(
+                client,
+                project_id,
+                destination_dataset_id,
+                temp_destination_table_name,
+            )
+
+        print(f"Error processing table '{source_table_name}': {e}")
+        raise e
+
+
+def _iter_destination_table_specs(
     client,
     project_id,
     source_dataset_id,
+    source_table_name,
     destination_dataset_id,
-    table_name,
-    source_location,
-    table_prefix,
 ):
-    # Infer how schema should be transformed.
-    source_table_ref = f"{project_id}.{source_dataset_id}.{table_name}"
-    source_table = client.get_table(source_table_ref)
-    source_schema = source_table.schema
+    source_schema = get_table_schema(
+        client, project_id, source_dataset_id, source_table_name
+    )
     should_unnest_objects = _should_unnest_objects(source_dataset_id)
     transformed_schema = transform_table_schema(
         source_schema,
         client,
         project_id,
         source_dataset_id,
-        table_name,
+        source_table_name,
         should_unnest_objects,
     )
 
-    created_temp_table_refs = []
-    table_mappings = []
-    add_join_key = bool(transformed_schema.get("subtables"))
+    source_table_ref = f"{project_id}.{source_dataset_id}.{source_table_name}"
 
-    try:
-        # Create temp version of main table and insert data to it.
-        temp_table_ref, table_name_final = _create_temp_table(
-            table_prefix=table_prefix,
-            transformed_schema=transformed_schema,
-            project_id=project_id,
-            destination_dataset_id=destination_dataset_id,
-            source_table=source_table,
-            client=client,
-        )
-        created_temp_table_refs.append(temp_table_ref)
-        table_mappings.append((temp_table_ref, table_name_final))
-        _insert_data(
-            transformed_schema, temp_table_ref, source_table_ref, client, add_join_key
-        )
+    # Main table.
+    yield {
+        "name": convert_to_snake_case(transformed_schema["table_name"]),
+        "schema_list": transformed_schema["fields"],
+        "query_select_list": transformed_schema["select_list"],
+        "query_from": f"""
+            `{source_table_ref}`
+        """,
+    }
 
-        _add_demo_tables(
-            project_id,
-            table_name,
-            table_prefix,
-            destination_dataset_id,
-            source_table,
-            client,
-            source_table_ref,
-        )
-
-        # Create temp version of possible subtables and insert data to them.
+    # Subtables.
+    if are_subtables_enabled(source_dataset_id):
         for subtable_schema in transformed_schema["subtables"]:
-            if not are_subtables_enabled(source_dataset_id):
-                break
+            json_column_name = subtable_schema["json_column_name"]
+            yield {
+                "name": convert_to_snake_case(subtable_schema["table_name"]),
+                "schema_list": subtable_schema["fields"],
+                "query_select_list": subtable_schema["select_list"],
+                "query_from": f"""
+                    `{source_table_ref}`
+                    CROSS JOIN UNNEST(JSON_EXTRACT_ARRAY(`{json_column_name}`)) AS array_item
+                """,
+            }
 
-            temp_table_ref, table_name_final = _create_temp_table(
-                table_prefix=table_prefix,
-                transformed_schema=subtable_schema,
-                project_id=project_id,
-                destination_dataset_id=destination_dataset_id,
-                source_table=source_table,
-                client=client,
-            )
-            created_temp_table_refs.append(temp_table_ref)
-            table_mappings.append((temp_table_ref, table_name_final))
-            _insert_data_to_subtable(
-                subtable_schema, temp_table_ref, source_table_ref, client
-            )
+    # M-Files file content tables.
+    if "m_files" in source_dataset_id and source_table_name == "objects_files_contents":
+        yield from transform_json_column_to_tables(
+            client,
+            project_id,
+            source_dataset_id,
+            destination_dataset_id,
+            source_table_name,
+            ["ObjectType", "ObjectID", "FileID"],
+            "FileName",
+            "ContentJson",
+        )
 
-        # Remove original tables.
-        for temp_table_ref, table_name_final in table_mappings:
-            _delete_table(project_id, destination_dataset_id, table_name_final, client)
 
-        # Rename temp tables to original tables.
-        for temp_table_ref, table_name_final in table_mappings:
-            _rename_temp_to_original(
-                temp_table_ref, table_name_final, project_id, client
-            )
-
-        print(f"Table '{table_name}' transformed.")
-
-    except Exception as e:
-        # Delete the temporary tables in case of an error.
-        for table_ref in created_temp_table_refs:
-            try:
-                client.delete_table(table_ref)
-            except NotFound:
-                pass
-
-        print(f"Error processing table '{table_name}': {e}")
-        raise e
+def _make_temp_destination_table(
+    client,
+    project_id,
+    destination_dataset_id,
+    temp_destination_table_name,
+    destination_table_spec,
+):
+    create_table_with_schema(
+        client,
+        project_id,
+        destination_dataset_id,
+        temp_destination_table_name,
+        schema=destination_table_spec["schema_list"],
+    )
+    query_select = ", \n".join(destination_table_spec["query_select_list"])
+    query_from = destination_table_spec["query_from"]
+    destination_table_query = f"""
+        SELECT {query_select}
+        FROM {query_from}
+    """
+    insert_query_result_to_table(
+        client,
+        project_id,
+        destination_dataset_id,
+        temp_destination_table_name,
+        destination_table_query,
+    )
 
 
 def _add_demo_tables(
@@ -145,9 +226,9 @@ def _add_demo_tables(
     table_name,
     table_prefix,
     destination_dataset_id,
-    source_table,
     client,
-    source_table_ref,
+    source_dataset_id,
+    source_table_name,
 ):
     if not (
         project_id in ("quickbi-demoexte2168", "quickbi-eerontok6534")
@@ -212,88 +293,42 @@ def _add_demo_tables(
         },
     ]
     for transformed_schema in transformed_schemas:
-        temp_table_ref, table_name_final = _create_temp_table(
-            table_prefix=table_prefix,
-            transformed_schema=transformed_schema,
-            project_id=project_id,
-            destination_dataset_id=destination_dataset_id,
-            source_table=source_table,
-            client=client,
+        table_name_snake_case = convert_to_snake_case(transformed_schema["table_name"])
+        table_name_final = f"{table_prefix}__{table_name_snake_case}"
+
+        temp_table_name = get_unique_temp_table_name(table_name_final)
+        create_table_with_schema(
+            client,
+            project_id,
+            destination_dataset_id,
+            temp_table_name,
+            schema=transformed_schema["fields"],
         )
-        _insert_data(
-            transformed_schema, temp_table_ref, source_table_ref, client, False
+        source_table_ref = f"{project_id}.{source_dataset_id}.{source_table_name}"
+        select_list_str = ", \n".join(transformed_schema["select_list"])
+        query = f"""
+            SELECT
+                {select_list_str}
+            FROM `{source_table_ref}`
+        """
+        insert_query_result_to_table(
+            client,
+            project_id,
+            destination_dataset_id,
+            temp_table_name,
+            query,
         )
-        _delete_table(project_id, destination_dataset_id, table_name_final, client)
-        _rename_temp_to_original(temp_table_ref, table_name_final, project_id, client)
 
-
-def _create_temp_table(
-    table_prefix,
-    transformed_schema,
-    project_id,
-    destination_dataset_id,
-    source_table,
-    client,
-):
-    table_name = transformed_schema["table_name"]
-    table_name_snake_case = convert_to_snake_case(table_name)
-    table_name_final = f"{table_prefix}__{table_name_snake_case}"
-    temp_table_id = get_unique_temp_table_name(table_name_final)
-    destination_temp_table_ref = (
-        f"{project_id}.{destination_dataset_id}.{temp_table_id}"
-    )
-    destination_schema = transformed_schema["fields"]
-
-    # Create table.
-    destination_temp_table = bigquery.Table(
-        destination_temp_table_ref, schema=destination_schema
-    )
-    client.create_table(destination_temp_table)
-
-    return destination_temp_table_ref, table_name_final
-
-
-def _insert_data(
-    transformed_schema, temp_table_ref, source_table_ref, client, add_join_key
-):
-    select_list_str = _get_select_list(transformed_schema)
-    query = f"""
-        INSERT INTO `{temp_table_ref}`
-        SELECT {select_list_str}
-        FROM `{source_table_ref}`
-    """
-    client.query(query).result()
-
-
-def _insert_data_to_subtable(
-    transformed_schema, temp_table_ref, source_table_ref, client
-):
-    select_list_str = _get_select_list(transformed_schema)
-    json_column_name = transformed_schema["json_column_name"]
-    query = f"""
-        INSERT INTO `{temp_table_ref}`
-        SELECT {select_list_str}
-        FROM `{source_table_ref}`
-        CROSS JOIN UNNEST(json_extract_array(`{json_column_name}`)) AS array_item
-    """
-    client.query(query).result()
-
-
-def _get_select_list(transformed_schema):
-    return ", \n".join(transformed_schema["select_list"])
-
-
-def _delete_table(project_id, destination_dataset_id, table_name_final, client):
-    destination_table_ref = f"{project_id}.{destination_dataset_id}.{table_name_final}"
-    try:
-        client.delete_table(destination_table_ref)
-    except NotFound:
-        pass
-
-
-def _rename_temp_to_original(temp_table_ref, table_name_final, project_id, client):
-    rename_query = f"""
-        ALTER TABLE `{temp_table_ref}`
-        RENAME TO `{table_name_final}`
-    """
-    client.query(rename_query).result()
+        delete_table(
+            client,
+            project_id,
+            destination_dataset_id,
+            table_name_final,
+        )
+        rename_table(
+            client,
+            project_id,
+            destination_dataset_id,
+            temp_table_name,
+            table_name_final,
+        )
