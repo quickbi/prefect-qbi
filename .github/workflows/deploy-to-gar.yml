@@ -43,6 +43,6 @@ jobs:
           image_tag=$([ "${{ github.ref_name }}" = "main" ] && echo "production" || echo "staging")
           docker build . -t "$image_name:$image_tag"
           if [ $image_tag = "production" ]; then
-            docker tag "$image_name" "$image_name:latest"
+            docker tag "$image_name:$image_tag" "$image_name:latest"
           fi
           docker push "$image_name" --all-tags
