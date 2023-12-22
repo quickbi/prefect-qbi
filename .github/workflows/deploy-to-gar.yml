@@ -39,6 +39,6 @@ jobs:
         name: Build and push
         run: |
           docker build . \
-            -t "${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ github.event.repository.name }}:latest"
+            -t "${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ github.event.repository.name }}:latest" \
             -t "${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ github.event.repository.name }}:staging"
           docker push "${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ github.event.repository.name }}" --all-tags
