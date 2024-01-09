@@ -215,6 +215,38 @@ def map_to_new_fields(original_field, json_column_schemas):
                             "json_key": original_field.name,
                         }
                     ]
+                elif data_type == "INT64":
+                    subtables[original_field.name] = [
+                        {
+                            "field": bigquery.SchemaField(
+                                clean_name(original_field.name),
+                                metadata["data_type"],
+                                mode=metadata["mode"],
+                            ),
+                            # LAX_INT64 is not currently used as it could possibly
+                            # change the data in unintended way, for example 3.5 to 4.
+                            # If we start getting errors from this (meaning analyzing
+                            # data type didn't succeed) let's figure out what to do.
+                            "select_str": "INT64(array_item)",
+                            "json_key": original_field.name,
+                        }
+                    ]
+                elif data_type == "FLOAT64":
+                    subtables[original_field.name] = [
+                        {
+                            "field": bigquery.SchemaField(
+                                clean_name(original_field.name),
+                                metadata["data_type"],
+                                mode=metadata["mode"],
+                            ),
+                            # LAX_FLOAT64 is not currently used as it could possibly
+                            # change the data in unintended way.
+                            # If we start getting errors from this (meaning analyzing
+                            # data type didn't succeed) let's figure out what to do.
+                            "select_str": "FLOAT64(array_item)",
+                            "json_key": original_field.name,
+                        }
+                    ]
 
             else:
                 new_fields.append(item)
