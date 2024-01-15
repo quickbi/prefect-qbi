@@ -2,6 +2,7 @@ prefect-dbt==0.3.1
 anyio==3.7.1
 gcsfs==2023.6.0
 google-cloud-bigquery==3.11.4
+google-cloud-dataform==0.5.5
 prefect-airbyte==0.2.0
 prefect-gcp==0.4.5
 prefect-shell==0.1.5
