@@ -1,3 +1,4 @@
+from google.cloud import dataform_v1beta1
 from prefect import task
 from prefect_gcp import GcpCredentials
 
@@ -34,7 +35,7 @@ def run_dataform(
     gcp_credentials_block = GcpCredentials.load(gcp_credentials_block_name)
     credentials = gcp_credentials_block.get_credentials_from_service_account()
     project = gcp_credentials_block.project
-    assert project_id, "No project found"
+    assert project, "No project found"
 
     with dataform_v1beta1.DataformClient(credentials=credentials) as client:
         dataform.run(client, project, location, repository)
