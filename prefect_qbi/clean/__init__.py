@@ -206,18 +206,26 @@ def _make_temp_destination_table(
         temp_destination_table_name,
         schema=destination_table_spec["schema_list"],
     )
-    query_select = ", \n".join(destination_table_spec["query_select_list"])
+    query_select = ", \n".join(
+        f"{query_select_expr} AS `{schema_field.name}`"
+        for query_select_expr, schema_field in zip(
+            destination_table_spec["query_select_list"],
+            destination_table_spec["schema_list"],
+        )
+    )
     query_from = destination_table_spec["query_from"]
     destination_table_query = f"""
         SELECT {query_select}
         FROM {query_from}
     """
+    query_parameters = destination_table_spec.get("query_parameters", [])
     insert_query_result_to_table(
         client,
         project_id,
         destination_dataset_id,
         temp_destination_table_name,
         destination_table_query,
+        query_parameters,
     )
 
 
