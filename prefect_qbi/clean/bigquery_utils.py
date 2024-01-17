@@ -9,26 +9,22 @@ def insert_query_result_to_table(
     dataset_id: str,
     table_name: str,
     query: str,
+    query_parameters: list[
+        bigquery.ArrayQueryParameter
+        | bigquery.ScalarQueryParameter
+        | bigquery.StructQueryParameter
+    ],
 ):
     table_ref = f"{project_id}.{dataset_id}.{table_name}"
-
-    insert_query = f"""
-        INSERT INTO `{table_ref}`
-        {query}
-    """
-    client.query(insert_query).result()
-
-    # TODO: maybe
-    """
     client.query(
         query,
         job_config=bigquery.QueryJobConfig(
             destination=table_ref,
             create_disposition="CREATE_NEVER",
             write_disposition="WRITE_EMPTY",
+            query_parameters=query_parameters,
         ),
     ).result()
-    """
 
 
 def create_table_with_schema(
