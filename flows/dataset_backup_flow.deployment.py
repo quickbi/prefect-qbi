@@ -5,15 +5,15 @@ from prefect.deployments import Deployment
 from prefect.filesystems import GCS
 from prefect.infrastructure.container import DockerContainer
 
-from run_dataform_flow import run_dataform_flow
+from dataset_backup_flow import dataset_backup_flow
 
 
 def deploy(
     env,
     customer_id,
     gcp_credentials_block_name,
-    repository_location,
-    repository_name,
+    dataset_id,
+    bucket_name,
 ):
     assert Path.cwd() == Path(__file__).parent
     gcs_block = GCS.load("qbi-prefect-storage")
@@ -24,8 +24,8 @@ def deploy(
     }[env]
 
     deployment = Deployment.build_from_flow(
-        flow=run_dataform_flow,
-        name=f"{customer_id}-{run_dataform_flow.name}",
+        flow=dataset_backup_flow,
+        name=f"{customer_id}-{dataset_backup_flow.name}",
         storage=gcs_block,
         infrastructure=docker_container_block,
         work_queue_name=work_queue_name,
@@ -33,8 +33,8 @@ def deploy(
         path="prefect-qbi",
         parameters={
             "gcp_credentials_block_name": gcp_credentials_block_name,
-            "repository_location": repository_location,
-            "repository_name": repository_name,
+            "dataset_id": dataset_id,
+            "bucket_name": bucket_name,
         },
     )
     deployment.apply()
