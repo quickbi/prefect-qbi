@@ -6,23 +6,25 @@ from . import backup, clean, dataform
 
 
 @task
-def backup_dataset(gcp_credentials_block_name, dataset_id, bucket_name):
+def backup_dataset(gcp_credentials_block_name, dataset_id, location, bucket_name):
     gcp_credentials_block = GcpCredentials.load(gcp_credentials_block_name)
     client = gcp_credentials_block.get_bigquery_client()
     project_id = gcp_credentials_block.project
     assert project_id, "No project found"
 
-    backup.dataset(client, project_id, dataset_id, bucket_name)
+    backup.dataset(client, project_id, dataset_id, location, bucket_name)
 
 
 @task
-def backup_table(gcp_credentials_block_name, dataset_id, table_id, bucket_name):
+def backup_table(
+    gcp_credentials_block_name, dataset_id, table_id, location, bucket_name
+):
     gcp_credentials_block = GcpCredentials.load(gcp_credentials_block_name)
     client = gcp_credentials_block.get_bigquery_client()
     project_id = gcp_credentials_block.project
     assert project_id, "No project found"
 
-    backup.table(client, project_id, dataset_id, table_id, bucket_name)
+    backup.table(client, project_id, dataset_id, table_id, location, bucket_name)
 
 
 @task
