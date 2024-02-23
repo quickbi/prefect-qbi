@@ -13,6 +13,7 @@ def deploy(
     customer_id,
     gcp_credentials_block_name,
     dataset_id,
+    location,
     bucket_name,
 ):
     assert Path.cwd() == Path(__file__).parent
@@ -34,6 +35,7 @@ def deploy(
         parameters={
             "gcp_credentials_block_name": gcp_credentials_block_name,
             "dataset_id": dataset_id,
+            "location": location,
             "bucket_name": bucket_name,
         },
     )
