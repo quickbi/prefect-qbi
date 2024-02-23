@@ -8,6 +8,10 @@
 ## Testing
 
 ```sh
+python test_dataset_backup.py "<project>" "<dataset-id>" "<location>" "<bucket_name>"
+```
+
+```sh
 python test_clean_dataset.py "<project>" "<source-dataset>" "<destination-dataset>" "<destination-table-prefix>"
 ```
 
