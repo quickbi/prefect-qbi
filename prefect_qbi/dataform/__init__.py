@@ -2,6 +2,7 @@ import logging
 import sys
 import time
 
+from google.api_core import exceptions, retry
 from google.cloud import dataform_v1beta1
 from prefect import get_run_logger
 
@@ -27,6 +28,12 @@ def _compile(
         f"projects/{project}/locations/{location}/repositories/{repository}"
     )
 
+    def should_retry(exc):
+        # The API sometimes returns error 400 with message:
+        # The remote repository [...] closed connection during remote operation.
+        default_should_retry = retry.if_transient_error(exc)
+        return default_should_retry or isinstance(exc, exceptions.InvalidArgument)
+
     compilation_result = client.create_compilation_result(
         parent=repository_path,
         compilation_result=dataform_v1beta1.CompilationResult(
@@ -35,6 +42,7 @@ def _compile(
                 default_schema="reporting",
             ),
         ),
+        retry=retry.Retry(predicate=should_retry),
     )
 
     if compilation_result.compilation_errors:
