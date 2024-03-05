@@ -64,6 +64,8 @@ def _execute(
     repository: str,
     compilation_result: str,
 ):
+    logger = get_logger()
+
     repository_path = (
         f"projects/{project}/locations/{location}/repositories/{repository}"
     )
@@ -85,6 +87,21 @@ def _execute(
             name=workflow_invocation.name,
         )
     if workflow_invocation.state != dataform_v1beta1.WorkflowInvocation.State.SUCCEEDED:
+        response = client.query_workflow_invocation_actions(
+            request=dataform_v1beta1.QueryWorkflowInvocationActionsRequest(
+                name=workflow_invocation.name,
+            ),
+        )
+        for workflow_invocation_action in response:
+            if (
+                workflow_invocation_action.state
+                == dataform_v1beta1.WorkflowInvocationAction.State.FAILED
+            ):
+                logger.error(
+                    "Execution error in %s: %s",
+                    workflow_invocation_action.canonical_target.name,
+                    workflow_invocation_action.failure_reason,
+                )
         raise Exception("Execution terminated unsuccefully")
 
 
