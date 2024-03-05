@@ -73,6 +73,18 @@ def _execute(
         f"{repository_path}/compilationResults/{compilation_result}"
     )
 
+    response = client.query_compilation_result_actions(
+        request=dataform_v1beta1.QueryCompilationResultActionsRequest(
+            name=compilation_result_path,
+        ),
+    )
+    for compilation_result_action in response:
+        break
+    else:
+        # Trying to create workflow invocation with no actions fails.
+        logger.warning("No actions found! Skipping execution...")
+        return
+
     workflow_invocation = client.create_workflow_invocation(
         parent=f"projects/{project}/locations/{location}/repositories/{repository}",
         workflow_invocation=dataform_v1beta1.WorkflowInvocation(
