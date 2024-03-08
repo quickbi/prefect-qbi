@@ -38,8 +38,7 @@ jobs:
           password: ${{ steps.auth.outputs.access_token }}
       -
         name: Build and push
-        run: |
-          image_name="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ github.event.repository.name }}"
-          image_tag=$([ "${{ github.ref_name }}" = "main" ] && echo "production" || echo "staging")
-          docker build . -t "$image_name:$image_tag"
-          docker push "$image_name:$image_tag"
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ github.event.repository.name }}:${{ github.ref_name == 'main' && 'production' || 'staging' }}
