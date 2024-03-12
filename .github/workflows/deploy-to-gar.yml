@@ -1,4 +1,4 @@
-name: Deploy to Google Artifact Registry on push
+name: Deploy to Google Artifact Registry
 
 on:
   push:
@@ -45,7 +45,7 @@ jobs:
           if [ "${{ github.event_name == 'release' }}" = true ]; then
             tag1="${{ format('{0}-docker.pkg.dev/{1}/{2}/{3}:{4}', env.GAR_LOCATION, env.GAR_PROJECT_ID, env.GAR_REPOSITORY, github.event.repository.name, 'production') }}"
             tag2="${{ format('{0}-docker.pkg.dev/{1}/{2}/{3}:{4}', env.GAR_LOCATION, env.GAR_PROJECT_ID, env.GAR_REPOSITORY, github.event.repository.name, github.event.release.tag_name) }}"
-            tags="$tag1$'\n'$tag2"
+            tags="$tag1,$tag2"
           else
             tags="${{ format('{0}-docker.pkg.dev/{1}/{2}/{3}:{4}', env.GAR_LOCATION, env.GAR_PROJECT_ID, env.GAR_REPOSITORY, github.event.repository.name, 'staging') }}"
           fi
