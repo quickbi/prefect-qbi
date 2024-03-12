@@ -6,4 +6,4 @@ google-cloud-dataform==0.5.5
 prefect-airbyte==0.2.0
 prefect-gcp==0.4.5
 prefect-shell==0.1.5
-prefect==2.11.5
+prefect==2.14.3
