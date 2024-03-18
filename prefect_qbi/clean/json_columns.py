@@ -139,7 +139,7 @@ def analyze_dict(obj, schema):
 
 def analyze_list(obj, previous_schema):
     json_column_schema = {}
-    types = set([get_bigquery_type(val) for val in obj])
+    types = set([get_bigquery_type(val) for val in obj if val is not None])
     if not types:
         return previous_schema
 
